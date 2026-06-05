@@ -84,14 +84,25 @@ emit_android_paths() {
     #
     # HOST_CC/HOST_CXX must be pinned to the SYSTEM clang: setting only CC makes
     # Firefox use the NDK clang for HOST build tools too (e.g. the glslopt build
-    # script, TARGET=x86_64-unknown-linux-gnu), and the NDK clang vs the system
-    # glibc headers blows up ("once_flag"/"call_once" redefinition). Host tools
-    # must build with the native system clang.
+    # script, TARGET=x86_64-unknown-linux-gnu). Host tools must build with the
+    # native system clang.
     ndk_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
     echo "CC=\"$ndk_bin/clang\""
     echo "CXX=\"$ndk_bin/clang++\""
     echo "HOST_CC=\"${HOST_CC:-/usr/bin/clang}\""
     echo "HOST_CXX=\"${HOST_CXX:-/usr/bin/clang++}\""
+    # Host C build tools (notably the vendored glsl-optimizer behind glslopt)
+    # won't compile against a bleeding-edge distro glibc: it declares C11/C23
+    # once_flag/call_once that collide with glsl-optimizer's bundled shim
+    # ("typedef redefinition", "static declaration of call_once follows
+    # non-static"). It's compiler-independent (system clang hits it too). Mozilla
+    # builds host code against a PINNED older-glibc sysroot; --enable-bootstrap
+    # fetches just that host sysroot (small) and the build adds --sysroot to host
+    # compiles, so the collision disappears while our system clang stays the host
+    # compiler. Scoped to the sysroot so it doesn't pull a whole Mozilla clang.
+    # If configure rejects this exact name/syntax, fall back to plain
+    # `ac_add_options --enable-bootstrap` (sets up whatever it needs).
+    echo "ac_add_options --enable-bootstrap=+sysroot-x86_64-linux-gnu"
     # RLBox wasm-sandboxed libraries (expat/woff2/graphite/hunspell/ogg/…) need a
     # WASI sysroot to compile to wasm32-wasi. A `mach bootstrap` build fetches one;
     # on the skip-bootstrap path there is none, so configure fails ("Cannot find
