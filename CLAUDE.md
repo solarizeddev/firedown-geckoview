@@ -238,16 +238,23 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
 
 - **Phase 1 (per ABI):** `mach build` cross-compiles Gecko (C++/Rust) for each
   triple in `ANDROID_TARGETS` into its own objdir; the heavy first-time step.
-  Each yields a per-ABI `geckoview-…-withGeckoBinaries-release.aar`.
+  Then `./mach gradle geckoview:assembleRelease` yields a per-ABI
+  `geckoview*-release.aar`. **GeckoView dropped the
+  `withGeckoBinaries`/`withoutGeckoBinaries` product flavors** — binaries are now
+  configured onto the plain `release` variant, so the old
+  `assembleWithGeckoBinariesRelease` task and the `…-withGeckoBinaries-release.aar`
+  name are **gone** (symptom: gradle "task not found"). Tasks/AAR are now just
+  `…Release` / `geckoview*-release.aar`.
 - **Phase 2 (fat-AAR):** a `--disable-compile-environment` pass (repackage only,
   fast) with `MOZ_ANDROID_FAT_AAR_ARCHITECTURES` + `MOZ_ANDROID_FAT_AAR_<ABI>`
   combines the per-ABI AARs and publishes via `./mach gradle
-  geckoview:publishWithGeckoBinariesReleasePublicationToMavenLocal` —
-  `withGeckoBinaries` = the real libs (not the stub), and a mavenLocal publish
-  carries the **POM with transitive deps** (a bare `.aar` in `app/libs` would
-  miss them).
-- The published **artifactId varies by flavor**, so `05-sync-to-app.sh` detects
-  it from `~/.m2` rather than hardcoding, and prints/edits the app's
+  geckoview:publishReleasePublicationToMavenLocal` (publication is named after the
+  variant, `release`). A mavenLocal publish carries the **POM with transitive
+  deps** (a bare `.aar` in `app/libs` would miss them).
+- The published **artifactId** is `geckoview` (lite) or `geckoview-omni`
+  (`computeArtifactId`: `-omni` unless `MOZ_ANDROID_GECKOVIEW_LITE`; the app
+  references `geckoview`/lite). `05-sync-to-app.sh` detects whatever was published
+  from `~/.m2` rather than hardcoding, and prints/edits the app's
   `settings.gradle` (`mavenLocal()`) + `app/build.gradle` (the geckoview line).
 
 ## After changing a patch / bumping the version

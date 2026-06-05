@@ -183,13 +183,18 @@ for T in $ANDROID_TARGETS; do
   } >> "$MOZCONFIG"
 
   ./mach build "${MACH_JOBS[@]}"
-  ./mach gradle geckoview:assembleWithGeckoBinariesRelease
+  # GeckoView dropped the withGeckoBinaries/withoutGeckoBinaries product flavors:
+  # gecko binaries are now configured onto the plain `release` variant
+  # (configureVariantWithGeckoBinaries), so the task is `assembleRelease` and the
+  # AAR is `geckoview*-release.aar` (no `withGeckoBinaries` infix). The old
+  # `assembleWithGeckoBinariesRelease` no longer exists ("task not found").
+  ./mach gradle geckoview:assembleRelease
 
   AAR="$(find "$GECKO_SRC/$OBJ" -path '*geckoview*outputs/aar*' \
-           -name '*withGeckoBinaries-release.aar' 2>/dev/null | head -1)"
+           -name 'geckoview*-release.aar' 2>/dev/null | head -1)"
   if [ -z "$AAR" ]; then
     echo "ERROR: per-ABI AAR not found under $OBJ (gradle output path changed?)." >&2
-    echo "       Look for *withGeckoBinaries-release.aar and update this script." >&2
+    echo "       Look for geckoview*-release.aar and update this script." >&2
     exit 1
   fi
   AAR_FOR_ABI[$ABI]="$AAR"
@@ -220,7 +225,9 @@ cat "$MOZCONFIG"
 echo
 
 ./mach build "${MACH_JOBS[@]}"
-./mach gradle geckoview:publishWithGeckoBinariesReleasePublicationToMavenLocal
+# Publication is named after the variant (`release`), not the old flavor — so
+# `publishReleasePublicationToMavenLocal`, not `publishWithGeckoBinariesRelease…`.
+./mach gradle geckoview:publishReleasePublicationToMavenLocal
 
 echo
 echo "[ok] build complete. Multi-ABI ($ABI_LIST) published under"
