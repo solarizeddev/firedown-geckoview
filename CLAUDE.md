@@ -6,6 +6,25 @@ IronFox/Mull approach). The app repo (`firedown`) consumes the resulting AAR;
 its `CLAUDE.md` has the media-capture/download context. The native ffmpeg fork
 lives in `firedown-ffmpeg`.
 
+## Session handoff — READ FIRST
+
+This repo was bootstrapped in a prior session and handed off as a git bundle.
+
+- **Base branch: `claude/jolly-dirac-mSEby`.** Continue working on it — do **not**
+  cut a new branch for follow-up work (one working branch per session, same rule
+  as the other Firedown repos).
+- **Canonical home: `solarizeddev/firedown-geckoview`.** If the remote is empty
+  or missing this branch, push it to populate the repo:
+  ```bash
+  git push -u origin claude/jolly-dirac-mSEby
+  ```
+  (Use `-u origin <branch>`; retry with exponential backoff on network errors.
+  Don't open a PR or push to `main` unless asked.)
+- The build/patch design is below. Nothing here has been compiled yet — the next
+  build runs on the user's Arch machine. If asked to verify, the cheap gate is
+  `./build.sh fetch && ./build.sh patch` (confirms the WebAuthn anchor still
+  matches the target Firefox version before any multi-hour compile).
+
 ## What this repo does
 
 `build.sh` drives five stages (`scripts/0X-*.sh`): fetch Firefox source →
