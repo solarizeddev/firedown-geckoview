@@ -42,6 +42,28 @@ if [ -n "${BUILD_JOBS:-}" ]; then
   echo "== build jobs: -j$BUILD_JOBS (CARGO_BUILD_JOBS=$BUILD_JOBS) =="
 fi
 
+# Existing Android SDK/NDK (build.env). Export for the gradle step (which reads
+# ANDROID_HOME), and emit --with-android-{sdk,ndk} into each per-ABI mozconfig
+# below so configure uses them instead of the bootstrap-managed ~/.mozbuild copy.
+# Empty => bootstrap-managed toolchain (unchanged default).
+if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+  export ANDROID_SDK_ROOT ANDROID_HOME="$ANDROID_SDK_ROOT"
+fi
+if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+  export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+fi
+# Append --with-android-sdk/ndk (only the ones that are set) to the mozconfig
+# currently being assembled. The compile (per-ABI) phase needs both; the fat-AAR
+# repackage doesn't compile, so it relies on the ANDROID_HOME export for gradle.
+emit_android_paths() {
+  if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+    echo "ac_add_options --with-android-sdk=$ANDROID_SDK_ROOT"
+  fi
+  if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+    echo "ac_add_options --with-android-ndk=$ANDROID_NDK_ROOT"
+  fi
+}
+
 TEMPLATE="$ROOT/mozconfig/geckoview-release.mozconfig"
 MOZCONFIG="$GECKO_SRC/mozconfig"
 
@@ -77,6 +99,7 @@ for T in $ANDROID_TARGETS; do
     echo "# --- injected by 04-build.sh (per-ABI) ---"
     echo "ac_add_options --target=$T"
     echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/$OBJ"
+    emit_android_paths
   } >> "$MOZCONFIG"
 
   ./mach build "${MACH_JOBS[@]}"

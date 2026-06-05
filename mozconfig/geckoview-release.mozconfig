@@ -40,8 +40,10 @@ ac_add_options --disable-eme
 # --- Android toolchain ---------------------------------------------------------
 # After `./mach bootstrap` (scripts/02-bootstrap.sh) the SDK/NDK live under
 # ~/.mozbuild and mach auto-detects them; no explicit --with-android-sdk needed.
-# Uncomment + adjust only if you manage the SDK yourself:
-# ac_add_options --with-android-sdk="$HOME/.mozbuild/android-sdk-linux"
+# To reuse an EXISTING SDK/NDK instead of bootstrapping, don't edit this file —
+# set ANDROID_SDK_ROOT / ANDROID_NDK_ROOT in config/build.env; 04-build.sh then
+# appends the matching --with-android-sdk / --with-android-ndk per ABI and skips
+# the step-02 download.
 
 # Speed: use sccache if present (bootstrap can install it). Harmless if absent
 # is NOT true — only enable if you actually have it. Left commented by default.
