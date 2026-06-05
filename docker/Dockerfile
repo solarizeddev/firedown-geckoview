@@ -10,15 +10,20 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-# Minimal host packages — `mach bootstrap` installs the actual build toolchain
-# itself (it knows apt). curl/git/python for fetch+bootstrap; sudo so bootstrap
-# can apt-install; locales because the build wants a UTF-8 locale; ca-certificates
-# for HTTPS fetches.
+# Host build prerequisites. `mach bootstrap` fetches the heavy Android toolchain
+# (clang/sysroot/wasi/SDK/NDK) itself, but it does NOT reliably provide the base
+# host build tools on a minimal image — configure needs `make`/`gmake`, a host
+# compiler, pkg-config, m4, etc. — so install build-essential & friends here.
+# curl/git/python for fetch+bootstrap; sudo so bootstrap can apt-install anything
+# else; locales for a UTF-8 build locale.
+#
+# Keep /var/lib/apt/lists (do NOT `rm` it): `mach bootstrap` runs its own
+# `apt-get install`, which fails with empty package lists.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget git mercurial \
-      python3 python3-pip python3-venv \
+      python3 python3-pip python3-venv python3-dev \
+      build-essential make pkg-config m4 gawk \
       sudo locales file unzip zip xz-utils \
-    && rm -rf /var/lib/apt/lists/* \
     && locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
