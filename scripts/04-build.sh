@@ -68,7 +68,7 @@ fi
 # currently being assembled. The compile (per-ABI) phase needs both; the fat-AAR
 # repackage doesn't compile, so it relies on the ANDROID_HOME export for gradle.
 emit_android_paths() {
-  local ndk_bin
+  local ndk_bin java_bin
   if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
     echo "ac_add_options --with-android-sdk=$ANDROID_SDK_ROOT"
   fi
@@ -108,6 +108,22 @@ emit_android_paths() {
       echo "WASM_CXX=\"${WASM_CXX:-/usr/bin/clang++}\""
     else
       echo "ac_add_options --without-wasm-sandboxed-libraries"
+    fi
+    # JDK: a bootstrap build uses the JDK it downloaded to ~/.mozbuild/jdk/…;
+    # on the skip path that's absent, so configure errors "Could not locate Java
+    # at ~/.mozbuild/jdk/…". Point it at the system JDK 17 — prefer $JAVA_HOME,
+    # else the Arch openjdk-17 default. (Evaluated on the build host.)
+    java_bin=""
+    if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/javac" ]; then
+      java_bin="$JAVA_HOME/bin"
+    elif [ -x /usr/lib/jvm/java-17-openjdk/bin/javac ]; then
+      java_bin="/usr/lib/jvm/java-17-openjdk/bin"
+    fi
+    if [ -n "$java_bin" ]; then
+      echo "ac_add_options --with-java-bin-path=$java_bin"
+    else
+      echo "WARN: no system JDK 17 found — set JAVA_HOME or install jdk17-openjdk;" \
+           "configure will look for the (absent) bootstrap JDK." >&2
     fi
   fi
 }
