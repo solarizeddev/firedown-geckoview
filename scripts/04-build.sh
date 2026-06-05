@@ -18,6 +18,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT/config/build.env"
 
+# Pin the GeckoView buildid so the published coordinate is the fixed
+# <milestone>.<buildid> (e.g. 151.0.20260601110758) instead of a wall-clock one.
+# Exported here so EVERY mach build below — each per-ABI phase-1 build and the
+# phase-2 fat-AAR pass — stamps the same buildid; otherwise the per-ABI AARs and
+# the fat AAR could disagree on version. Empty GECKOVIEW_BUILD_DATE => default
+# wall-clock buildid (non-reproducible).
+if [ -n "${GECKOVIEW_BUILD_DATE:-}" ]; then
+  export MOZ_BUILD_DATE="$GECKOVIEW_BUILD_DATE"
+  echo "== pinning MOZ_BUILD_DATE=$MOZ_BUILD_DATE -> GeckoView ${FIREFOX_VERSION}.$MOZ_BUILD_DATE =="
+fi
+
 TEMPLATE="$ROOT/mozconfig/geckoview-release.mozconfig"
 MOZCONFIG="$GECKO_SRC/mozconfig"
 

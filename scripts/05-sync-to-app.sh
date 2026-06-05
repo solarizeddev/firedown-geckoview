@@ -26,6 +26,16 @@ VER="$(find "$ART_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' \
 echo "== Detected local GeckoView =="
 echo "   artifactId : $ART_ID"
 echo "   version    : $VER"
+
+# If the build pinned a version (GECKOVIEW_BUILD_DATE), the published coordinate
+# must match it. A mismatch means MOZ_BUILD_DATE didn't take (stale objdir, env
+# not exported, …) — wiring the app to the wrong version would fail to resolve.
+if [ -n "${GECKOVIEW_VERSION:-}" ] && [ "$VER" != "$GECKOVIEW_VERSION" ]; then
+  echo "   WARNING: detected version '$VER' != pinned GECKOVIEW_VERSION" \
+       "'$GECKOVIEW_VERSION'." >&2
+  echo "            MOZ_BUILD_DATE likely didn't apply — rebuild from a clean" >&2
+  echo "            objdir, or clear the stale ~/.m2 entry, before syncing." >&2
+fi
 echo
 echo "== Apply these to the firedown app =="
 cat <<EOF

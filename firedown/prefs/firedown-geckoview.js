@@ -69,6 +69,27 @@ pref("media.peerconnection.ice.default_address_only", true);
 // pref("dom.security.https_only_mode", true);
 pref("dom.security.https_only_mode_pbm", true);
 
+// ---- UTC timezone spoofing — runtime toggle, NO engine patch needed ---------
+// IronFox spoofs the timezone to UTC via a code patch + a custom bool pref
+// (browser.ironfox.fingerprintingProtection.timezoneSpoofing.enabled →
+// nsRFPService reads it and forces RFPTarget::JSDateTimeUTC). We do NOT need
+// that patch: FPP is already enabled in this build, so JSDateTimeUTC is a
+// stock target the app can switch on/off at runtime through the standard
+// granular-override prefs — no source change, in keeping with the repo's
+// prefer-prefs-over-patches rule.
+//
+// The toggle is owned by the APP (GeckoPreferenceController), default OFF.
+// To turn UTC spoofing ON, set the global FPP override to add the target:
+//     privacy.fingerprintingProtection.overrides = "+JSDateTimeUTC"
+// To turn it OFF, clear that pref (or set "-JSDateTimeUTC"). This is additive
+// to — and independent of — the per-site privacy.fingerprintingProtection.
+// granularOverrides the app already uses to scope CanvasRandomization to
+// tiktok.com, so enabling it does NOT disturb that. We intentionally ship no
+// default here (absent override == OFF) rather than baking timezone spoofing
+// in, because UTC clocks confuse calendar/scheduling sites and it's a user
+// choice, not a safe global default. Spoofing the timezone has not been seen
+// to affect media capture (the throttle vectors are canvas, not the clock).
+
 // ---- IronFox-derived: connection / add-on probe hardening -------------------
 // Near-zero site-behaviour impact; pure attack-surface / fingerprint reduction.
 // IronFox disables speculative connections with a code patch

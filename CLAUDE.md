@@ -143,6 +143,31 @@ investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it
 - Rebuild and re-`sync`. Revert the app's experimental microG
   `play-services-fido` swap (the source build supersedes it).
 
+### Pinning the GeckoView version (`MOZ_BUILD_DATE`)
+
+The published Maven coordinate is `<milestone>.<buildid>`, e.g.
+`151.0.20260601110758`. The milestone comes from the source; the buildid is
+normally the build's wall clock (non-reproducible). `config/build.env`'s
+`GECKOVIEW_BUILD_DATE` (14-digit `YYYYMMDDHHMMSS`) pins it — `04-build.sh`
+exports it as `MOZ_BUILD_DATE` for **every** mach build (each per-ABI pass *and*
+the fat-AAR repackage) so all artifacts agree on the version, and `05-sync`
+warns if the published version doesn't match `GECKOVIEW_VERSION`. This is the
+coordinate the app's `app/build.gradle` `geckoviewVersion` must reference.
+Pinning only changes the version **label** — to ship newer engine code you must
+also bump `FIREFOX_VERSION`/`FIREFOX_TAG`. ABIs (`ANDROID_TARGETS`) are
+arm64-v8a + x86_64 (`aarch64-linux-android x86_64-linux-android`).
+
+### UTC timezone spoofing is an app toggle, not a build patch
+
+IronFox spoofs the timezone to UTC with a code patch (a custom bool pref read in
+`nsRFPService.cpp` that forces `RFPTarget::JSDateTimeUTC`). Firedown needs none
+of that: FPP is already on, so `JSDateTimeUTC` is a stock target the app flips at
+runtime via `privacy.fingerprintingProtection.overrides` (`+JSDateTimeUTC` on,
+clear/`-JSDateTimeUTC` off). It's additive to and independent of the per-site
+`granularOverrides` used to scope CanvasRandomization to tiktok.com. Default OFF
+(UTC clocks confuse calendar sites; it's a user choice). See the comment block in
+`firedown/prefs/firedown-geckoview.js`. Don't add a code patch for this.
+
 ## Conventions
 
 - Don't commit the Gecko source tree or build outputs (`.gitignore`).
