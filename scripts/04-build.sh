@@ -79,12 +79,19 @@ emit_android_paths() {
     # libunwind); when we skip bootstrap to reuse an existing NDK, configure
     # otherwise falls back to the SYSTEM clang, which only has the host runtime —
     # so target conftests fail to link ("cannot open libclang_rt.builtins.a",
-    # "unable to find library -l:libunwind.a"). The NDK clang bundles both. Host
-    # tools keep the auto-detected system clang (HOST_CC is left unset). The
+    # "unable to find library -l:libunwind.a"). The NDK clang bundles both. The
     # linux-x86_64 prebuilt dir is the only host layout this build supports.
+    #
+    # HOST_CC/HOST_CXX must be pinned to the SYSTEM clang: setting only CC makes
+    # Firefox use the NDK clang for HOST build tools too (e.g. the glslopt build
+    # script, TARGET=x86_64-unknown-linux-gnu), and the NDK clang vs the system
+    # glibc headers blows up ("once_flag"/"call_once" redefinition). Host tools
+    # must build with the native system clang.
     ndk_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
     echo "CC=\"$ndk_bin/clang\""
     echo "CXX=\"$ndk_bin/clang++\""
+    echo "HOST_CC=\"${HOST_CC:-/usr/bin/clang}\""
+    echo "HOST_CXX=\"${HOST_CXX:-/usr/bin/clang++}\""
     # RLBox wasm-sandboxed libraries (expat/woff2/graphite/hunspell/ogg/…) need a
     # WASI sysroot to compile to wasm32-wasi. A `mach bootstrap` build fetches one;
     # on the skip-bootstrap path there is none, so configure fails ("Cannot find
