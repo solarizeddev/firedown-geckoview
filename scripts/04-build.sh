@@ -56,11 +56,23 @@ fi
 # currently being assembled. The compile (per-ABI) phase needs both; the fat-AAR
 # repackage doesn't compile, so it relies on the ANDROID_HOME export for gradle.
 emit_android_paths() {
+  local ndk_bin
   if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
     echo "ac_add_options --with-android-sdk=$ANDROID_SDK_ROOT"
   fi
   if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
     echo "ac_add_options --with-android-ndk=$ANDROID_NDK_ROOT"
+    # Use the NDK's clang as the TARGET compiler. A `mach bootstrap` build would
+    # use Mozilla's own clang (which ships the Android compiler-rt builtins +
+    # libunwind); when we skip bootstrap to reuse an existing NDK, configure
+    # otherwise falls back to the SYSTEM clang, which only has the host runtime —
+    # so target conftests fail to link ("cannot open libclang_rt.builtins.a",
+    # "unable to find library -l:libunwind.a"). The NDK clang bundles both. Host
+    # tools keep the auto-detected system clang (HOST_CC is left unset). The
+    # linux-x86_64 prebuilt dir is the only host layout this build supports.
+    ndk_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+    echo "CC=\"$ndk_bin/clang\""
+    echo "CXX=\"$ndk_bin/clang++\""
   fi
 }
 
