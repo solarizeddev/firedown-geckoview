@@ -68,4 +68,29 @@ pref("media.peerconnection.ice.default_address_only", true);
 // off; uncomment if you want it as the default.
 // pref("dom.security.https_only_mode", true);
 pref("dom.security.https_only_mode_pbm", true);
+
+// ---- IronFox-derived: connection / add-on probe hardening -------------------
+// Near-zero site-behaviour impact; pure attack-surface / fingerprint reduction.
+// IronFox disables speculative connections with a code patch
+// (geckoview-disable-speculative-connections.patch); the pref expresses the
+// same thing without a source diff. The mozAddonManager pair stops a remote
+// page from probing or triggering add-on installs (note:
+// block_mozAddonManager does NOT enable global resistFingerprinting despite the
+// pref prefix — it's a standalone toggle).
+pref("network.http.speculative-parallel-limit", 0);
+pref("extensions.webapi.enabled", false);
+pref("privacy.resistFingerprinting.block_mozAddonManager", true);
+
+// ---- IronFox-derived: silence Mozilla phone-home endpoints ------------------
+// These stop background pings to Mozilla services that a no-telemetry build has
+// no use for. Tradeoff: with the captive-portal/connectivity service off, a
+// hotspot login page won't auto-pop — opening any http URL still triggers it.
+// Kept as defaults (runtime-overridable) so a user who needs captive-portal
+// auto-detect can flip it back.
+pref("network.connectivity-service.enabled", false);
+pref("network.captive-portal-service.enabled", false);
+pref("captivedetect.canonicalURL", "");
+pref("browser.region.network.url", "");
+pref("browser.region.update.enabled", false);
+pref("extensions.getAddons.cache.enabled", false);
 // FIREDOWN-GECKO-PREFS-END

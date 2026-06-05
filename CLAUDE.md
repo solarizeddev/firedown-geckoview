@@ -45,7 +45,8 @@ patch is gated on a marker or canonical content):
 | kind | file | purpose |
 |------|------|---------|
 | Java edit | `firedown/patches/0001-webauthn-credential-manager.sh` | Force `WebAuthnTokenManager` to use Android Credential Manager — rewrites the `if (!BuildConfig.MOZILLA_OFFICIAL)` gate(s) to `if (true)`. Marker `FIREDOWN-WEBAUTHN-CREDMAN`. **Fails loudly** if the anchor moved. |
-| pref append | `firedown/patches/0002-default-prefs.sh` + `firedown/prefs/firedown-geckoview.js` | Append default prefs (DRM-off, telemetry-off, Pocket/sponsored-off, hardened privacy) to `mobile/android/app/geckoview-prefs.js`. Marker `FIREDOWN-GECKO-PREFS`. |
+| pref append | `firedown/patches/0002-default-prefs.sh` + `firedown/prefs/firedown-geckoview.js` | Append default prefs (DRM-off, telemetry-off, Pocket/sponsored-off, hardened privacy, plus IronFox-derived connection/add-on-probe + phone-home-endpoint prefs) to `mobile/android/app/geckoview-prefs.js`. Marker `FIREDOWN-GECKO-PREFS`. |
+| Java/C++ edit | `firedown/patches/0003-disable-network-id.sh` | Make `nsAndroidNetworkLinkService::GetNetworkID` return an empty network ID (drops the network-change fingerprint/correlation signal). IronFox-derived (`gecko-disable-network-id`), Android-only. Marker `FIREDOWN-NETWORK-ID`. **Fails loudly** if the method body anchor moved. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--disable-eme` (DRM), `--disable-crashreporter`, `MOZ_TELEMETRY_REPORTING=`/`MOZ_DATA_REPORTING=`/`MOZ_NORMANDY=`, release/Android target. |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
@@ -53,6 +54,42 @@ can still override at runtime, so nothing hard-conflicts); **build flags** remov
 code/endpoints at compile time (belt-and-suspenders with the prefs); the **Java
 edit** is the one thing that must be a code patch (it's a guarded branch, not a
 pref).
+
+### IronFox patch triage — what we deliberately did NOT take
+
+Firedown is a **downloader first**; the cardinal constraint is that media capture
+keeps working (see the app repo's CLAUDE.md on the scoped-not-global
+fingerprinting story). IronFox (gitlab.com/ironfox-oss/IronFox) is a hardened
+*general-purpose* browser, so a lot of its engine patches are neutral-to-harmful
+here. When pulling more from IronFox, keep these **deliberate skips** in mind —
+each one would break capture or the app, so don't "rediscover" them:
+
+- **`gecko-fix-canvas-randomization`** — makes canvas noise more aggressive
+  (applies under `EfficientRandomize`, stops skipping uniform pixel groups). This
+  collides head-on with the app's *scoped* TikTok canvas-randomization override;
+  taking it globally risks the very "Something went wrong" throttle the app works
+  to dodge. **Never.**
+- **`geckoview-disable-network-connectivity-monitoring`** — strips
+  `ACCESS_NETWORK_STATE` + `GeckoNetworkManager`. A downloader wants network-state
+  awareness. **No.**
+- **`gecko-remove-privileged-addon-signing-status`** — could de-privilege the
+  bundled built-in WebExtensions (parser/uBO). **No.**
+- **`gecko-support-safe-browsing-download-protection`** — sends download URLs to
+  Google's reputation service. Anti-privacy for a no-telemetry build. **No.**
+- **`gecko-rs-blocker` / `gecko-certificate-pinning`** — the RS allowlist can
+  break cert-revocation/CRLite; the pins are IronFox's own domains. **No.**
+- **`geckoview-liberate`** (microG `play-services-fido` swap) — superseded by
+  `0001` (Credential Manager doesn't use FIDO2/GMS at all). The app's notes even
+  say to *revert* the experimental microG FIDO swap once the source build lands.
+- Already covered by our prefs / mozconfig and skipped as redundant:
+  `gecko-stub-beacon` (`beacon.enabled=false`), the Nimbus/Normandy patches
+  (`app.normandy.*`, `messaging-system.rsexperimentloader.enabled`),
+  `geckoview-disable-crash-reporting` (`--disable-crashreporter`).
+
+What we **did** take from IronFox: `0003` (network-id), the speculative-connection
+/ mozAddonManager / phone-home-endpoint prefs in `firedown-geckoview.js`, and (as
+ever) the WebAuthn→CredManager change that `0001` already implemented
+independently.
 
 ### Why the appliers fail loudly, not silently
 
