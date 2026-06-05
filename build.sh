@@ -8,6 +8,9 @@
 #   ./build.sh build     # 04  build + publish AAR to mavenLocal
 #   ./build.sh sync      # 05  print app wiring  (add --apply to edit firedown)
 #   ./build.sh all       # fetch → bootstrap → patch → build → sync
+#   ./build.sh docker    #     run `all` (or passed stages) inside the build
+#                        #     container — use this on a too-new-glibc host (Arch),
+#                        #     where the vendored glsl-optimizer won't compile.
 #
 # config/build.env holds version/ABI/source-method/app-path settings.
 set -euo pipefail
@@ -22,6 +25,7 @@ case "${1:-all}" in
   patch)     bash "$S/03-apply-patches.sh" ;;
   build)     bash "$S/04-build.sh" ;;
   sync)      shift; bash "$S/05-sync-to-app.sh" "$@" ;;
+  docker)    shift; bash "$ROOT/docker/build-in-docker.sh" "$@" ;;
   all)
     bash "$S/01-fetch-source.sh"
     bash "$S/02-bootstrap.sh"
@@ -30,7 +34,7 @@ case "${1:-all}" in
     bash "$S/05-sync-to-app.sh"
     ;;
   *)
-    echo "usage: ./build.sh {prereqs|fetch|bootstrap|patch|build|sync|all}" >&2
+    echo "usage: ./build.sh {prereqs|fetch|bootstrap|patch|build|sync|all|docker}" >&2
     exit 2
     ;;
 esac

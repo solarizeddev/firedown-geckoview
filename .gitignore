@@ -9,3 +9,6 @@ objdir*/
 
 # Local tool state.
 .mozbuild/
+
+# Docker build caches (gecko checkout, ~/.mozbuild, ~/.cargo bind mounts).
+.docker-build/

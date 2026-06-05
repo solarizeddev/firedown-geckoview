@@ -91,18 +91,16 @@ emit_android_paths() {
     echo "CXX=\"$ndk_bin/clang++\""
     echo "HOST_CC=\"${HOST_CC:-/usr/bin/clang}\""
     echo "HOST_CXX=\"${HOST_CXX:-/usr/bin/clang++}\""
-    # Host C build tools (notably the vendored glsl-optimizer behind glslopt)
-    # won't compile against a bleeding-edge distro glibc: it declares C11/C23
-    # once_flag/call_once that collide with glsl-optimizer's bundled shim
-    # ("typedef redefinition", "static declaration of call_once follows
-    # non-static"). It's compiler-independent (system clang hits it too). Mozilla
-    # builds host code against a PINNED older-glibc sysroot; --enable-bootstrap
-    # fetches just that host sysroot (small) and the build adds --sysroot to host
-    # compiles, so the collision disappears while our system clang stays the host
-    # compiler. Scoped to the sysroot so it doesn't pull a whole Mozilla clang.
-    # If configure rejects this exact name/syntax, fall back to plain
-    # `ac_add_options --enable-bootstrap` (sets up whatever it needs).
-    echo "ac_add_options --enable-bootstrap=+sysroot-x86_64-linux-gnu"
+    # NOTE: on a bleeding-edge-glibc host (e.g. Arch) the vendored glsl-optimizer
+    # (the glslopt host build) fails to compile — glibc declares C11/C23
+    # once_flag/call_once that collide with its bundled shim ("typedef
+    # redefinition", "static declaration of call_once follows non-static"). This
+    # is NOT a toolchain-location problem and can't be fixed from here: it's
+    # compiler-independent (system clang hits it too), and --enable-bootstrap's
+    # host sysroot does NOT reach cargo build-scripts (cc-rs reads CFLAGS_<host>
+    # with no --sysroot). The fix is to build in a container with a stable older
+    # glibc — see `docker/` and `./build.sh docker`. (This reuse path still works
+    # on a host whose glibc isn't too new.)
     # RLBox wasm-sandboxed libraries (expat/woff2/graphite/hunspell/ogg/…) need a
     # WASI sysroot to compile to wasm32-wasi. A `mach bootstrap` build fetches one;
     # on the skip-bootstrap path there is none, so configure fails ("Cannot find

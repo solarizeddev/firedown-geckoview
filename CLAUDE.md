@@ -17,11 +17,18 @@ prior session.
   two in lockstep if you touch both, but `main` is the source of truth.
 - Push with `git push -u origin main` (retry with exponential backoff on network
   errors). Don't open a PR unless asked.
-- The build/patch design is below. Nothing here has been compiled yet — the next
-  build runs on the user's Arch machine. **Do not run a full `mach build`
-  in-session.** If asked to verify, the cheap gate is
-  `./build.sh fetch && ./build.sh patch` (confirms the WebAuthn anchor still
-  matches the target Firefox version before any multi-hour compile).
+- The build/patch design is below. **Do not run a full `mach build` in-session.**
+  If asked to verify, the cheap gate is `./build.sh fetch && ./build.sh patch`
+  (confirms the patch anchors still match the target Firefox version before any
+  multi-hour compile).
+- **Build status:** driven on the user's Arch box. The reuse-existing-SDK/NDK
+  path (FF 151, NDK r29) cleared configure and compiled ~4 min of Gecko, then hit
+  a **hard wall**: the host's bleeding-edge **glibc** breaks Firefox's vendored
+  `glsl-optimizer` (`once_flag`/`call_once` redefinition) — *not* a toolchain
+  problem, and unfixable from the mozconfig (see the glibc lesson below). **The
+  resolution is `./build.sh docker`** — build in a stable-glibc container. Prefer
+  that on Arch / any too-new-glibc host. The elaborate skip-bootstrap
+  compensations below still apply on a host whose glibc isn't too new.
 
 ## What this repo does
 
@@ -125,21 +132,83 @@ investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it
 
 ## Skip-bootstrap toolchain compensations (reuse-existing-SDK/NDK path)
 
-Setting `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT` (config/build.env) skips
-`mach bootstrap` and its multi-GB download — but bootstrap also provisions the
-rest of the toolchain, so `04-build.sh` makes the build self-sufficient on this
-path: it injects `--with-android-sdk/ndk`, points `CC`/`CXX` at the **NDK's**
-clang (system clang lacks the Android `compiler-rt`/`libunwind`), `rustup target
-add`s each ABI, and handles RLBox wasm-sandboxing via the **`WASI_SYSROOT`** knob:
-set it (e.g. Arch's `wasi-libc` at `/usr/share/wasi-sysroot`) to KEEP RLBox
-(`--with-wasi-sysroot`, the more-hardened stock config, slight speed cost for
-those parsers); leave it empty and the build falls back to
-`--without-wasm-sandboxed-libraries` so the reuse path compiles at all (libs run
-native — slightly faster but un-sandboxed). All of these are **gated on the reuse
-path**, so a normal `mach bootstrap` build is unchanged (Mozilla clang, fetched
-wasi-sysroot, RLBox on). Host deps (llvm-objdump, cbindgen, JDK 17, the Rust
-targets) come from `00-prereqs-arch.sh`. (Note: sandboxing is a security feature,
-not a perf one — disabling it is marginally *faster*, just less isolated.)
+Setting `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT` in `config/build.env` (they also
+honour exported `ANDROID_HOME`/`ANDROID_NDK_HOME`) makes `02-bootstrap.sh` **skip
+`mach bootstrap`** and its multi-GB download. But bootstrap provisions the *whole*
+toolchain, so reusing your own SDK/NDK means you must supply everything else.
+`04-build.sh` injects the rest into each per-ABI mozconfig (all **gated on the
+reuse path** — a normal `mach bootstrap` build is untouched: Mozilla clang+sysroot,
+fetched wasi-sysroot, RLBox on). The full list, learned the hard way (each one was
+a distinct configure/compile failure):
+
+| bootstrap provides | reuse-path replacement (in `04-build.sh` unless noted) | symptom if missing |
+|---|---|---|
+| Android SDK/NDK | `--with-android-sdk` / `--with-android-ndk` | "You must install the Android platforms…" |
+| target compiler | `CC`/`CXX` = the **NDK's** clang | system clang lacks Android `compiler-rt`/`libunwind` → link conftest fails |
+| host compiler | `HOST_CC`/`HOST_CXX` = **system** clang | setting only `CC` makes host build tools (glslopt) use the NDK clang too |
+| host sysroot | `--enable-bootstrap=+sysroot-x86_64-linux-gnu` (small fetch) | **glslopt vs new glibc** — see below |
+| wasi-sysroot (RLBox) | `WASI_SYSROOT` → `--with-wasi-sysroot` + `WASM_CC`/`WASM_CXX`=system clang | "Cannot find wasi headers"; then wasm-ld can't find `libclang_rt.builtins-wasm32.a` (NDK clang has no wasm builtins; system clang + Arch `wasi-compiler-rt` does) |
+| vendored JDK | `--with-java-bin-path` = `$JAVA_HOME`/Arch openjdk-17 | "Could not locate Java at ~/.mozbuild/jdk/…" |
+| bundletool.jar | `02-bootstrap.sh` fetches it to `~/.mozbuild` (`BUNDLETOOL_VERSION`) | "You must install Bundletool" |
+| Rust std targets | `04-build.sh` + `00-prereqs` `rustup target add` per ABI | "can't find crate for std" |
+| host tools (llvm-objdump, cbindgen) | `00-prereqs-arch.sh` packages (`llvm`, `rust-cbindgen`) | "Cannot find llvm-objdump", missing cbindgen |
+
+Still **manual** (version-pinned by Firefox, so we don't fetch blindly): the SDK
+**platform** — `sdkmanager "platforms;android-36.1"` — and the **NDK must be the
+exact version FF pins (r29 for 151)**; configure validates it.
+
+### The big lesson: bleeding-edge distro glibc vs vendored C
+
+The one issue that *isn't* about tool location: the vendored **`glsl-optimizer`**
+(behind the `glslopt` host build crate) won't compile against a very new glibc —
+glibc now declares C11/C23 `once_flag`/`call_once` (in `stdlib.h` /
+`bits/types/once_flag.h`) that collide with glsl-optimizer's bundled `c11/threads`
+shim (`typedef redefinition`, `static declaration of call_once follows
+non-static`). It is **compiler-independent** (system clang hits it too), so
+`HOST_CC` doesn't fix it. Mozilla's CI never sees it because it compiles host code
+against a **pinned older-glibc sysroot**.
+
+Things that were tried on the host and **did NOT work** (don't repeat them):
+`HOST_CC`=system clang (host now used system clang — same error); and
+`--enable-bootstrap[=+sysroot-x86_64-linux-gnu]` — configure accepts it, but the
+host sysroot is **not propagated to cargo build-scripts** (cc-rs invokes
+`/usr/bin/clang … -I…/dist/include` with `CFLAGS_<host>` that carries **no
+`--sysroot`**), so glslopt still compiles against the system glibc. The reliable
+fix is **`./build.sh docker`** — a stable-glibc container running the normal
+bootstrap (see the Docker section). Patching the vendored glsl-optimizer was the
+only no-container alternative and is fragile (more glibc conflicts downstream).
+
+RLBox note: `WASI_SYSROOT` empty → `--without-wasm-sandboxed-libraries` (libs run
+native, *faster* but un-sandboxed — sandboxing is a security feature, not a perf
+one). Set it (Arch `wasi-libc` at `/usr/share/wasi-sysroot`, plus
+`wasi-compiler-rt`) to keep RLBox.
+
+## Building in Docker (the glibc fix — RECOMMENDED on Arch)
+
+`./build.sh docker` (→ `docker/build-in-docker.sh`, image from `docker/Dockerfile`)
+builds inside **Ubuntu 22.04** (stable, older glibc). This is the clean fix for the
+glibc-vs-`glsl-optimizer` wall the host build hits, and it's reproducible. Key
+design choices:
+
+- **It runs the FULL `mach bootstrap` path, not the reuse path.** The container
+  deliberately does *not* set `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT`/`WASI_SYSROOT`,
+  so bootstrap provisions **Mozilla's tested clang + host sysroot + wasi-sysroot +
+  SDK + NDK + JDK**. glslopt compiles (Mozilla's older-glibc host sysroot), RLBox
+  works (Mozilla's wasi), and none of the skip-bootstrap compensations are needed.
+  So inside Docker the whole "supply your own toolchain" saga simply doesn't apply.
+- **Caches are host-owned bind mounts under `.docker-build/`** (gitignored):
+  `gecko/` (the checkout), `mozbuild/` (toolchain + SDK/NDK), `cargo/`. Re-runs are
+  incremental; nothing huge re-downloads. The image's `builder` user is created with
+  the host UID/GID (`--build-arg`) so those mounts stay writable both sides.
+- **The AAR publishes to the host's `~/.m2`** (mounted in), so the firedown **app**
+  build still runs on the host (gradle/Java don't care about glibc) and resolves it
+  via `mavenLocal()` — `./build.sh sync` as usual.
+- Pass stages through: `./build.sh docker` = `all`; `./build.sh docker build` runs a
+  single stage in the container.
+
+Our app-facing mozconfig choices (version pin, `--enable-strip`, telemetry/DRM
+prefs, patches `0001`–`0003`, `BUILD_JOBS`) all still apply inside the container —
+only the *toolchain-acquisition* differs (bootstrap vs reuse).
 
 ## Build / publish mechanics
 
