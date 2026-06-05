@@ -39,4 +39,20 @@ RUN (groupadd -g "${GID}" builder || true) \
     && chmod 0440 /etc/sudoers.d/builder
 
 USER builder
+
+# Rust toolchain (managed), installed IN the image. `mach bootstrap` expects a
+# working rustup with a default toolchain + rustfmt + the Android targets; without
+# one it dies at `rustup component add rustfmt`. The cargo *bin/toolchain* live
+# here in the image — only cargo's source caches (registry/git) get bind-mounted
+# at runtime (as subdirs of ~/.cargo), so an empty/partial host dir can never
+# shadow this install (which is exactly the "rustup: no default toolchain" bug).
+ENV RUSTUP_HOME=/home/builder/.rustup CARGO_HOME=/home/builder/.cargo
+ENV PATH=/home/builder/.cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustup component add rustfmt clippy \
+    && rustup target add aarch64-linux-android x86_64-linux-android \
+    && cargo install cbindgen \
+    && rustc --version && cargo --version && cbindgen --version
+
 WORKDIR /work/src

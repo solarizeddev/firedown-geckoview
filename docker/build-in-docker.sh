@@ -27,7 +27,10 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$BUILDDIR/mozbuild" "$BUILDDIR/gecko" "$BUILDDIR/cargo" "$HOME/.m2"
+# Rust toolchain lives IN the image (see Dockerfile); persist only cargo's source
+# caches (registry/git) as subdir mounts so they can't shadow the rust install.
+mkdir -p "$BUILDDIR/mozbuild" "$BUILDDIR/gecko" \
+         "$BUILDDIR/cargo-registry" "$BUILDDIR/cargo-git" "$HOME/.m2"
 
 echo "== building image $IMAGE (uid $(id -u)) =="
 docker build -t "$IMAGE" \
@@ -44,7 +47,8 @@ exec docker run --rm -it \
   -v "$ROOT":/work/src \
   -v "$BUILDDIR/gecko":/work/src/gecko \
   -v "$BUILDDIR/mozbuild":/home/builder/.mozbuild \
-  -v "$BUILDDIR/cargo":/home/builder/.cargo \
+  -v "$BUILDDIR/cargo-registry":/home/builder/.cargo/registry \
+  -v "$BUILDDIR/cargo-git":/home/builder/.cargo/git \
   -v "$HOME/.m2":/home/builder/.m2 \
   -w /work/src \
   "$IMAGE" \
