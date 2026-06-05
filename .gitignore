@@ -1,0 +1,11 @@
+# The checked-out Gecko source tree (tens of GB) — never committed.
+/gecko/
+gecko/
+
+# Build outputs / objdirs.
+objdir*/
+*.aar
+*.tar.xz
+
+# Local tool state.
+.mozbuild/

@@ -1,0 +1,48 @@
+# Firedown GeckoView — release build for Android (GeckoView AAR, no browser app).
+#
+# scripts/04-build.sh copies this to <gecko-src>/mozconfig once per ABI (and once
+# more for the fat-AAR repackage pass), appending the per-phase target/objdir so
+# this file stays static. Appended lines look like:
+#     ac_add_options --target=<triple>                 # phase 1, per ABI
+#     mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-<abi>
+#   …and for the fat-AAR phase: --disable-compile-environment +
+#     export MOZ_ANDROID_FAT_AAR_ARCHITECTURES / MOZ_ANDROID_FAT_AAR_<ABI>.
+
+# --- What we're building -------------------------------------------------------
+ac_add_options --enable-application=mobile/android
+ac_add_options --enable-release
+ac_add_options --disable-debug
+ac_add_options --disable-tests
+ac_add_options --disable-rust-tests
+
+# --- Strip the reporting / data-collection machinery at build level ------------
+# (Belt-and-suspenders with the default prefs in firedown/prefs/. The prefs
+#  neutralize telemetry at runtime; these remove code/endpoints at compile time.)
+ac_add_options --disable-crashreporter
+ac_add_options --disable-parental-controls
+# These MOZ_* switches mirror IronFox/Mull. If your Firefox version's
+# moz.configure doesn't know one, configure will warn — comment the offender and
+# rely on the prefs file (which disables the same thing at runtime). They are
+# intentionally separated so a single bad var doesn't fail the whole build.
+ac_add_options MOZ_TELEMETRY_REPORTING=
+ac_add_options MOZ_DATA_REPORTING=
+ac_add_options MOZ_SERVICES_HEALTHREPORT=
+ac_add_options MOZ_NORMANDY=
+ac_add_options MOZ_CRASHREPORTER=0
+
+# --- DRM / EME off at build level ----------------------------------------------
+# Removes the EME (Encrypted Media Extensions) plumbing entirely. If configure
+# rejects --disable-eme on your version, drop this single line: the default pref
+# media.eme.enabled=false (firedown/prefs/firedown-geckoview.js) still disables
+# DRM at runtime, so you lose nothing functional.
+ac_add_options --disable-eme
+
+# --- Android toolchain ---------------------------------------------------------
+# After `./mach bootstrap` (scripts/02-bootstrap.sh) the SDK/NDK live under
+# ~/.mozbuild and mach auto-detects them; no explicit --with-android-sdk needed.
+# Uncomment + adjust only if you manage the SDK yourself:
+# ac_add_options --with-android-sdk="$HOME/.mozbuild/android-sdk-linux"
+
+# Speed: use sccache if present (bootstrap can install it). Harmless if absent
+# is NOT true — only enable if you actually have it. Left commented by default.
+# ac_add_options --with-ccache=sccache
