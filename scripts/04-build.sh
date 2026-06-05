@@ -29,6 +29,19 @@ if [ -n "${GECKOVIEW_BUILD_DATE:-}" ]; then
   echo "== pinning MOZ_BUILD_DATE=$MOZ_BUILD_DATE -> GeckoView ${FIREFOX_VERSION}.$MOZ_BUILD_DATE =="
 fi
 
+# Compilation parallelism. mach auto-detects (all logical cores) when no -j is
+# given; pinning BUILD_JOBS bounds it. Gecko's Rust/LTO link + codegen steps are
+# RAM-hungry, so on a high-core box a full -j$(nproc) can OOM — capping jobs is
+# the usual fix. Applies to every mach build below (the per-ABI compiles; the
+# fat-AAR pass doesn't compile so it's a no-op there). CARGO_BUILD_JOBS bounds
+# the Rust/cargo side to the same value. Empty BUILD_JOBS => mach auto-detect.
+MACH_JOBS=()
+if [ -n "${BUILD_JOBS:-}" ]; then
+  MACH_JOBS=(-j"$BUILD_JOBS")
+  export CARGO_BUILD_JOBS="$BUILD_JOBS"
+  echo "== build jobs: -j$BUILD_JOBS (CARGO_BUILD_JOBS=$BUILD_JOBS) =="
+fi
+
 TEMPLATE="$ROOT/mozconfig/geckoview-release.mozconfig"
 MOZCONFIG="$GECKO_SRC/mozconfig"
 
@@ -66,7 +79,7 @@ for T in $ANDROID_TARGETS; do
     echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/$OBJ"
   } >> "$MOZCONFIG"
 
-  ./mach build
+  ./mach build "${MACH_JOBS[@]}"
   ./mach gradle geckoview:assembleWithGeckoBinariesRelease
 
   AAR="$(find "$GECKO_SRC/$OBJ" -path '*geckoview*outputs/aar*' \
@@ -103,7 +116,7 @@ echo "== fat-AAR mozconfig =="
 cat "$MOZCONFIG"
 echo
 
-./mach build
+./mach build "${MACH_JOBS[@]}"
 ./mach gradle geckoview:publishWithGeckoBinariesReleasePublicationToMavenLocal
 
 echo
