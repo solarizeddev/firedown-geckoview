@@ -15,20 +15,30 @@ ac_add_options --disable-debug
 ac_add_options --disable-tests
 ac_add_options --disable-rust-tests
 
+# --- Shrink the shipped binaries (strip symbols) -------------------------------
+# libxul.so is by far the dominant APK weight; UNSTRIPPED it can be ~1 GB, and
+# stripped only ~100-200 MB. A local --enable-release build does NOT strip by
+# default, so strip both the build output and the packaged/installed libs — the
+# AAR (and the app APK that bundles it, per ABI) then carry no debug symbols.
+# Safe here: crashreporter is disabled and this is a no-telemetry app, so we
+# never need the symbols for symbolication.
+ac_add_options --enable-strip
+ac_add_options --enable-install-strip
+
 # --- Strip the reporting / data-collection machinery at build level ------------
-# (Belt-and-suspenders with the default prefs in firedown/prefs/. The prefs
-#  neutralize telemetry at runtime; these remove code/endpoints at compile time.)
+# Crash reporting + parental controls are removed via real configure OPTIONS.
 ac_add_options --disable-crashreporter
 ac_add_options --disable-parental-controls
-# These MOZ_* switches mirror IronFox/Mull. If your Firefox version's
-# moz.configure doesn't know one, configure will warn — comment the offender and
-# rely on the prefs file (which disables the same thing at runtime). They are
-# intentionally separated so a single bad var doesn't fail the whole build.
-ac_add_options MOZ_TELEMETRY_REPORTING=
-ac_add_options MOZ_DATA_REPORTING=
-ac_add_options MOZ_SERVICES_HEALTHREPORT=
-ac_add_options MOZ_NORMANDY=
-ac_add_options MOZ_CRASHREPORTER=0
+# The telemetry / data-reporting / healthreport / normandy MOZ_* vars are NOT
+# settable from a mozconfig in FF 151 — configure DERIVES them and ERRORS if you
+# try ("MOZ_SERVICES_HEALTHREPORT= can not be set by mozconfig ... accepted from:
+# implied"), so they're intentionally omitted (not just commented — present-but-
+# wrong fails the whole configure). They're covered without the flags: this is a
+# non-MOZILLA_OFFICIAL build (telemetry reporting is compiled off by default),
+# --disable-crashreporter above drops the crash/data-report plumbing, and the
+# runtime prefs in firedown/prefs/firedown-geckoview.js disable telemetry, data
+# reporting, healthreport and Normandy. The prefs are the load-bearing layer,
+# same as DRM. (MOZ_CRASHREPORTER is likewise implied by --disable-crashreporter.)
 
 # --- DRM / EME off -------------------------------------------------------------
 # NOTE: FF 151's mobile/android configure REJECTS `--disable-eme`
