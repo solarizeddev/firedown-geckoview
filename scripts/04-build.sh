@@ -97,6 +97,15 @@ emit_android_paths() {
     #    secure). This is only the fallback so the reuse path builds at all.
     if [ -n "${WASI_SYSROOT:-}" ]; then
       echo "ac_add_options --with-wasi-sysroot=$WASI_SYSROOT"
+      # The sandboxed libs are compiled to wasm by a SEPARATE compiler (WASM_CC),
+      # which defaults to our target CC = the NDK clang. But the NDK clang has no
+      # wasm32 compiler-rt builtins (wasm-ld: "cannot open
+      # .../wasm32-unknown-wasi/libclang_rt.builtins.a"), so aim WASM_CC/WASM_CXX
+      # at the SYSTEM clang instead — it pairs with Arch's wasi-compiler-rt, which
+      # installs the wasm builtins into the system clang's resource dir. Override
+      # by exporting WASM_CC/WASM_CXX (e.g. a versioned clang path).
+      echo "WASM_CC=\"${WASM_CC:-/usr/bin/clang}\""
+      echo "WASM_CXX=\"${WASM_CXX:-/usr/bin/clang++}\""
     else
       echo "ac_add_options --without-wasm-sandboxed-libraries"
     fi
