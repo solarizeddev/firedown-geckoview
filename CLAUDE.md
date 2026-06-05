@@ -130,14 +130,16 @@ Setting `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT` (config/build.env) skips
 rest of the toolchain, so `04-build.sh` makes the build self-sufficient on this
 path: it injects `--with-android-sdk/ndk`, points `CC`/`CXX` at the **NDK's**
 clang (system clang lacks the Android `compiler-rt`/`libunwind`), `rustup target
-add`s each ABI, and — because there's **no WASI sysroot** — disables RLBox with
-`--without-wasm-sandboxed-libraries` (the sandboxed libs still build, just
-un-sandboxed; a security tradeoff to avoid needing a wasm/wasi toolchain). All of
-these are **gated on the reuse path**, so a normal `mach bootstrap` build is
-unchanged (Mozilla clang, fetched wasi-sysroot, RLBox on). Host deps
-(llvm-objdump, cbindgen, JDK 17, the Rust targets) come from `00-prereqs-arch.sh`.
-To keep RLBox while reusing your own toolchain, provide a WASI sysroot and drop
-the `--without-wasm-sandboxed-libraries` line.
+add`s each ABI, and handles RLBox wasm-sandboxing via the **`WASI_SYSROOT`** knob:
+set it (e.g. Arch's `wasi-libc` at `/usr/share/wasi-sysroot`) to KEEP RLBox
+(`--with-wasi-sysroot`, the more-hardened stock config, slight speed cost for
+those parsers); leave it empty and the build falls back to
+`--without-wasm-sandboxed-libraries` so the reuse path compiles at all (libs run
+native — slightly faster but un-sandboxed). All of these are **gated on the reuse
+path**, so a normal `mach bootstrap` build is unchanged (Mozilla clang, fetched
+wasi-sysroot, RLBox on). Host deps (llvm-objdump, cbindgen, JDK 17, the Rust
+targets) come from `00-prereqs-arch.sh`. (Note: sandboxing is a security feature,
+not a perf one — disabling it is marginally *faster*, just less isolated.)
 
 ## Build / publish mechanics
 

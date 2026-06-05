@@ -85,15 +85,21 @@ emit_android_paths() {
     ndk_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
     echo "CC=\"$ndk_bin/clang\""
     echo "CXX=\"$ndk_bin/clang++\""
-    # No WASI sysroot on the skip-bootstrap path (a bootstrap build fetches one),
-    # so the RLBox wasm-sandboxed libraries (expat/woff2/graphite/hunspell/ogg/…)
-    # can't compile to wasm32-wasi ("Cannot find wasi headers"). Disable that
-    # sandboxing here — the libraries still build and run, just un-sandboxed (a
-    # security tradeoff, NOT a functional loss). Gated on the reuse-existing-NDK
-    # path, so a normal `mach bootstrap` build keeps RLBox. To keep RLBox while
-    # reusing your own toolchain, install a WASI sysroot + wasm clang and drop
-    # this (then set --with-wasi-sysroot instead).
-    echo "ac_add_options --without-wasm-sandboxed-libraries"
+    # RLBox wasm-sandboxed libraries (expat/woff2/graphite/hunspell/ogg/…) need a
+    # WASI sysroot to compile to wasm32-wasi. A `mach bootstrap` build fetches one;
+    # on the skip-bootstrap path there is none, so configure fails ("Cannot find
+    # wasi headers").
+    #  - WASI_SYSROOT set  -> keep RLBox: point configure at it (e.g. Arch's
+    #    wasi-libc, usually /usr/share/wasi-sysroot). Costs a little speed for
+    #    those parsers but is the more-hardened, stock-Firefox config.
+    #  - WASI_SYSROOT empty -> drop RLBox (--without-wasm-sandboxed-libraries):
+    #    the libs build/run NATIVE (slightly FASTER) but un-sandboxed (less
+    #    secure). This is only the fallback so the reuse path builds at all.
+    if [ -n "${WASI_SYSROOT:-}" ]; then
+      echo "ac_add_options --with-wasi-sysroot=$WASI_SYSROOT"
+    else
+      echo "ac_add_options --without-wasm-sandboxed-libraries"
+    fi
   fi
 }
 
