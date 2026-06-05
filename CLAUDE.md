@@ -54,6 +54,7 @@ patch is gated on a marker or canonical content):
 | Java edit | `firedown/patches/0001-webauthn-credential-manager.sh` | Force `WebAuthnTokenManager` to use Android Credential Manager — rewrites the `if (!BuildConfig.MOZILLA_OFFICIAL)` gate(s) to `if (true)`. Marker `FIREDOWN-WEBAUTHN-CREDMAN`. **Fails loudly** if the anchor moved. |
 | pref append | `firedown/patches/0002-default-prefs.sh` + `firedown/prefs/firedown-geckoview.js` | Append default prefs (DRM-off, telemetry-off, Pocket/sponsored-off, hardened privacy, plus IronFox-derived connection/add-on-probe + phone-home-endpoint prefs) to `mobile/android/app/geckoview-prefs.js`. Marker `FIREDOWN-GECKO-PREFS`. |
 | Java/C++ edit | `firedown/patches/0003-disable-network-id.sh` | Make `nsAndroidNetworkLinkService::GetNetworkID` return an empty network ID (drops the network-change fingerprint/correlation signal). IronFox-derived (`gecko-disable-network-id`), Android-only. Marker `FIREDOWN-NETWORK-ID`. **Fails loudly** if the method body anchor moved. |
+| Rust edit | `firedown/patches/0004-noop-glean-endpoints.sh` | Blank the Glean/FOG telemetry + OHTTP **upload endpoints** in `toolkit/components/glean/src/init/{mod.rs,viaduct_uploader.rs}` (→ `""`), so the compiled-in telemetry SDK has nowhere to POST. Defense-in-depth atop the runtime `uploadEnabled=false` pref; mirrors IronFox's `noop_mozilla_endpoints.sh` for the FOG layer. Marker `FIREDOWN-GLEAN-NOOP`. **Fails loudly** if an endpoint string moved. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
@@ -116,6 +117,29 @@ DRM-off was never allowed to depend on the build flag alone. If a future Firefox
 version accepts the flag again, re-add it for belt-and-suspenders compile-time
 removal; until then the pref is load-bearing. (Update the modifications table's
 "build flags" row too if you change this.)
+
+## Telemetry / Glean — compiled in, neutered two ways
+
+Glean (the Rust `glean-core` + `firefox-on-glean`/FOG) **compiles into GeckoView**
+— it's wired through thousands of instrumentation call sites, so there's no build
+flag to remove it (you'll see `glean-core` / `firefox-on-glean` compile, that's
+expected). It's neutered on two layers:
+1. **Runtime pref** — `datareporting.healthreport.uploadEnabled=false` (Glean's
+   master upload switch) + `toolkit.telemetry.*` off, in `firedown-geckoview.js`.
+   From a fresh profile that's never enabled, Glean collects/sends nothing (not
+   even the one-time deletion-request ping).
+2. **Source neuter (`0004`)** — blanks the FOG upload + OHTTP endpoint URLs to
+   `""`, so even if upload were somehow enabled there is **no server to POST to**.
+
+Scope note (don't "rediscover" this): IronFox disables Glean far more
+aggressively, but most of it is **app-layer** — Kotlin `glean-core` overlay stubs
+(`upload()→Incapable`, `Glean.initialize(){return}`) and Fenix/android-components/
+app-services "liberate" patches that remove the *callers*. **None of that is in a
+bare GeckoView AAR** (Firedown supplies its own app shell). The only IronFox Glean
+technique that maps onto our build is the FOG endpoint neuter, which is exactly
+what `0004` does. IronFox sets **no** `datareporting.*`/`toolkit.telemetry.*` prefs
+(it relies on the structural removal); we keep the prefs **and** add the source
+neuter, so our build is strictly at-or-beyond IronFox on actual Glean behavior.
 
 ## WebAuthn → Credential Manager (the important patch)
 
