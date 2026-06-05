@@ -123,6 +123,22 @@ the prebuilt-AAR route can't fix it (the constant is compiled in) and a source
 build can. See the app repo's CLAUDE.md "passkey/WebAuthn" notes for the full
 investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it).
 
+## Skip-bootstrap toolchain compensations (reuse-existing-SDK/NDK path)
+
+Setting `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT` (config/build.env) skips
+`mach bootstrap` and its multi-GB download — but bootstrap also provisions the
+rest of the toolchain, so `04-build.sh` makes the build self-sufficient on this
+path: it injects `--with-android-sdk/ndk`, points `CC`/`CXX` at the **NDK's**
+clang (system clang lacks the Android `compiler-rt`/`libunwind`), `rustup target
+add`s each ABI, and — because there's **no WASI sysroot** — disables RLBox with
+`--without-wasm-sandboxed-libraries` (the sandboxed libs still build, just
+un-sandboxed; a security tradeoff to avoid needing a wasm/wasi toolchain). All of
+these are **gated on the reuse path**, so a normal `mach bootstrap` build is
+unchanged (Mozilla clang, fetched wasi-sysroot, RLBox on). Host deps
+(llvm-objdump, cbindgen, JDK 17, the Rust targets) come from `00-prereqs-arch.sh`.
+To keep RLBox while reusing your own toolchain, provide a WASI sysroot and drop
+the `--without-wasm-sandboxed-libraries` line.
+
 ## Build / publish mechanics
 
 - **Phase 1 (per ABI):** `mach build` cross-compiles Gecko (C++/Rust) for each
