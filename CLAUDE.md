@@ -47,7 +47,7 @@ patch is gated on a marker or canonical content):
 | Java edit | `firedown/patches/0001-webauthn-credential-manager.sh` | Force `WebAuthnTokenManager` to use Android Credential Manager — rewrites the `if (!BuildConfig.MOZILLA_OFFICIAL)` gate(s) to `if (true)`. Marker `FIREDOWN-WEBAUTHN-CREDMAN`. **Fails loudly** if the anchor moved. |
 | pref append | `firedown/patches/0002-default-prefs.sh` + `firedown/prefs/firedown-geckoview.js` | Append default prefs (DRM-off, telemetry-off, Pocket/sponsored-off, hardened privacy, plus IronFox-derived connection/add-on-probe + phone-home-endpoint prefs) to `mobile/android/app/geckoview-prefs.js`. Marker `FIREDOWN-GECKO-PREFS`. |
 | Java/C++ edit | `firedown/patches/0003-disable-network-id.sh` | Make `nsAndroidNetworkLinkService::GetNetworkID` return an empty network ID (drops the network-change fingerprint/correlation signal). IronFox-derived (`gecko-disable-network-id`), Android-only. Marker `FIREDOWN-NETWORK-ID`. **Fails loudly** if the method body anchor moved. |
-| build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--disable-eme` (DRM), `--disable-crashreporter`, `MOZ_TELEMETRY_REPORTING=`/`MOZ_DATA_REPORTING=`/`MOZ_NORMANDY=`, release/Android target. |
+| build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--disable-crashreporter`, `MOZ_TELEMETRY_REPORTING=`/`MOZ_DATA_REPORTING=`/`MOZ_NORMANDY=`, release/Android target. (`--disable-eme` was removed — FF 151 configure rejects it; DRM-off is the runtime pref.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
 can still override at runtime, so nothing hard-conflicts); **build flags** remove
@@ -98,12 +98,17 @@ the GMS allowlist. So `0001` errors if `if (!BuildConfig.MOZILLA_OFFICIAL)` isn'
 found and `0002` errors if `geckoview-prefs.js` moved. On a version bump that's
 the signal to re-verify the anchor, not to relax the check.
 
-## DRM / EME — two layers
+## DRM / EME — runtime pref (the build flag is gone)
 
-`--disable-eme` (mozconfig) removes the EME plumbing at build; `media.eme.enabled
-= false` (prefs) disables it at runtime. If a Firefox version's configure rejects
-`--disable-eme`, drop that one line — the pref still disables DRM, so nothing
-functional is lost. Don't make DRM-off depend on the build flag alone.
+DRM-off is a two-layer design — `--disable-eme` (mozconfig, build) + `media.eme.enabled
+= false` (prefs, runtime) — but **FF 151's mobile/android configure REJECTS
+`--disable-eme`** (`InvalidOptionError: --disable-eme is not available in this
+configuration`), so the build flag is **removed** from the mozconfig. DRM/EME is
+still fully off via the runtime pref (plus the app's `setDRM`), which is why
+DRM-off was never allowed to depend on the build flag alone. If a future Firefox
+version accepts the flag again, re-add it for belt-and-suspenders compile-time
+removal; until then the pref is load-bearing. (Update the modifications table's
+"build flags" row too if you change this.)
 
 ## WebAuthn → Credential Manager (the important patch)
 

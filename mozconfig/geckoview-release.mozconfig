@@ -30,12 +30,15 @@ ac_add_options MOZ_SERVICES_HEALTHREPORT=
 ac_add_options MOZ_NORMANDY=
 ac_add_options MOZ_CRASHREPORTER=0
 
-# --- DRM / EME off at build level ----------------------------------------------
-# Removes the EME (Encrypted Media Extensions) plumbing entirely. If configure
-# rejects --disable-eme on your version, drop this single line: the default pref
-# media.eme.enabled=false (firedown/prefs/firedown-geckoview.js) still disables
-# DRM at runtime, so you lose nothing functional.
-ac_add_options --disable-eme
+# --- DRM / EME off -------------------------------------------------------------
+# NOTE: FF 151's mobile/android configure REJECTS `--disable-eme`
+# ("InvalidOptionError: --disable-eme is not available in this configuration"),
+# so it is intentionally NOT set here. DRM/EME is still fully disabled at runtime
+# by the default pref media.eme.enabled=false (firedown/prefs/firedown-geckoview.js)
+# plus the app's setDRM, so nothing functional is lost — DRM-off never depended on
+# this build flag alone. If a future Firefox version accepts the flag again and you
+# want belt-and-suspenders EME removal at compile time, re-add:
+#   ac_add_options --disable-eme
 
 # --- Android toolchain ---------------------------------------------------------
 # After `./mach bootstrap` (scripts/02-bootstrap.sh) the SDK/NDK live under
