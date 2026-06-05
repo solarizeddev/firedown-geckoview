@@ -28,6 +28,34 @@ if [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -n "${ANDROID_NDK_ROOT:-}" ]; then
   echo "       Ensure the NDK version matches what Firefox $FIREFOX_VERSION pins"
   echo "       (python/mozboot/mozboot/android.py NDK_VERSION); configure fails"
   echo "       loudly on a mismatch."
+
+  # Bundletool: a single Google JAR mach expects at ~/.mozbuild/bundletool.jar
+  # (configure errors "You must install Bundletool" without it). Bootstrap fetches
+  # it; provision it here on the skip path. The version isn't critical — the build
+  # only runs build-bundle — so any recent release works; override BUNDLETOOL_VERSION
+  # to pin a different one. (The Android SDK *platform* the build needs is content
+  # you install with sdkmanager, e.g. `sdkmanager "platforms;android-36.1"`; it's
+  # version-pinned by Firefox, so we don't fetch it here.)
+  bt_dir="${MOZBUILD_STATE_PATH:-$HOME/.mozbuild}"
+  bt_jar="$bt_dir/bundletool.jar"
+  bt_ver="${BUNDLETOOL_VERSION:-1.18.3}"
+  if [ ! -f "$bt_jar" ]; then
+    mkdir -p "$bt_dir"
+    bt_url="https://github.com/google/bundletool/releases/download/$bt_ver/bundletool-all-$bt_ver.jar"
+    echo "       fetching bundletool $bt_ver -> $bt_jar"
+    bt_i=1
+    until wget -q -O "$bt_jar" "$bt_url"; do
+      if [ "$bt_i" -ge 4 ]; then
+        rm -f "$bt_jar"
+        echo "ERROR(02): bundletool download failed from $bt_url" >&2
+        exit 1
+      fi
+      bt_s=$((2 ** bt_i)); echo "       retry $bt_i in ${bt_s}s…"; sleep "$bt_s"
+      bt_i=$((bt_i + 1))
+    done
+  else
+    echo "       bundletool already present ($bt_jar)"
+  fi
   exit 0
 fi
 
