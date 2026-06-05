@@ -52,6 +52,18 @@ fi
 if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
   export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 fi
+
+# Ensure the Rust std target for each ABI is installed before configure probes
+# it (otherwise: "can't find crate for std / target may not be installed"). The
+# ANDROID_TARGETS triples ARE the rustup target names, so add them directly.
+# Idempotent and per-user (no sudo); prereqs does this too, but `build.sh all`
+# doesn't run prereqs, so self-heal here. Skipped if rustup isn't managing rustc.
+if command -v rustup >/dev/null 2>&1; then
+  for T in $ANDROID_TARGETS; do
+    rustup target add "$T" >/dev/null 2>&1 || \
+      echo "WARN: 'rustup target add $T' failed — install it manually." >&2
+  done
+fi
 # Append --with-android-sdk/ndk (only the ones that are set) to the mozconfig
 # currently being assembled. The compile (per-ABI) phase needs both; the fat-AAR
 # repackage doesn't compile, so it relies on the ANDROID_HOME export for gradle.
