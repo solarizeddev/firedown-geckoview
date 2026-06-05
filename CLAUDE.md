@@ -8,20 +8,18 @@ lives in `firedown-ffmpeg`.
 
 ## Session handoff — READ FIRST
 
-This repo was bootstrapped in a prior session and handed off as a git bundle.
+This repo lives at **`solarizeddev/firedown-geckoview`**. It was bootstrapped in a
+prior session.
 
-- **Base branch: `claude/jolly-dirac-mSEby`.** Continue working on it — do **not**
-  cut a new branch for follow-up work (one working branch per session, same rule
-  as the other Firedown repos).
-- **Canonical home: `solarizeddev/firedown-geckoview`.** If the remote is empty
-  or missing this branch, push it to populate the repo:
-  ```bash
-  git push -u origin claude/jolly-dirac-mSEby
-  ```
-  (Use `-u origin <branch>`; retry with exponential backoff on network errors.
-  Don't open a PR or push to `main` unless asked.)
+- **Canonical branch: `main`.** Continue work there (one working branch — don't
+  cut a new one per task, same rule as the other Firedown repos). The
+  `claude/jolly-dirac-mSEby` branch also exists and holds the same tree; keep the
+  two in lockstep if you touch both, but `main` is the source of truth.
+- Push with `git push -u origin main` (retry with exponential backoff on network
+  errors). Don't open a PR unless asked.
 - The build/patch design is below. Nothing here has been compiled yet — the next
-  build runs on the user's Arch machine. If asked to verify, the cheap gate is
+  build runs on the user's Arch machine. **Do not run a full `mach build`
+  in-session.** If asked to verify, the cheap gate is
   `./build.sh fetch && ./build.sh patch` (confirms the WebAuthn anchor still
   matches the target Firefox version before any multi-hour compile).
 
@@ -113,6 +111,6 @@ investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it
 - Don't commit the Gecko source tree or build outputs (`.gitignore`).
 - Keep appliers idempotent and marker-gated; prefer appending prefs or a precise
   anchored edit over fragile context-diff `.patch` files.
-- Develop on a feature branch; open a PR only when asked.
+- Develop on `main` (the canonical branch); open a PR only when asked.
 - Match the surrounding comment density — explain *why* (including dead-ends),
   same as the other two repos.
