@@ -33,7 +33,16 @@ mkdir -p "$BUILDDIR/mozbuild" "$BUILDDIR/gecko" \
          "$BUILDDIR/cargo-registry" "$BUILDDIR/cargo-git" "$HOME/.m2"
 
 echo "== building image $IMAGE (uid $(id -u)) =="
-docker build -t "$IMAGE" \
+# Use the daemon's integrated BuildKit (available since Docker 18.09 via this env
+# var — no `buildx` CLI plugin needed for plain `docker build`). Two wins over the
+# legacy builder: it silences the "legacy builder is deprecated" warning, and with
+# --progress=plain it STREAMS each step's output live. The legacy builder instead
+# buffers a long RUN layer (apt/rustup) until the layer completes, so a first-time
+# or cache-missed image build looks frozen with no output for minutes — that's the
+# "nothing on console" you saw; the image was building quietly. Override with
+# DOCKER_BUILDKIT=0 to force the legacy builder.
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+docker build --progress=plain -t "$IMAGE" \
   --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
   "$ROOT/docker"
 
