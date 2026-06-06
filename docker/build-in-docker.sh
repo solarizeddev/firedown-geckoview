@@ -33,16 +33,31 @@ mkdir -p "$BUILDDIR/mozbuild" "$BUILDDIR/gecko" \
          "$BUILDDIR/cargo-registry" "$BUILDDIR/cargo-git" "$HOME/.m2"
 
 echo "== building image $IMAGE (uid $(id -u)) =="
-# Use the daemon's integrated BuildKit (available since Docker 18.09 via this env
-# var — no `buildx` CLI plugin needed for plain `docker build`). Two wins over the
-# legacy builder: it silences the "legacy builder is deprecated" warning, and with
-# --progress=plain it STREAMS each step's output live. The legacy builder instead
-# buffers a long RUN layer (apt/rustup) until the layer completes, so a first-time
-# or cache-missed image build looks frozen with no output for minutes — that's the
-# "nothing on console" you saw; the image was building quietly. Override with
-# DOCKER_BUILDKIT=0 to force the legacy builder.
-export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
-docker build --progress=plain -t "$IMAGE" \
+# Prefer BuildKit for the image build — it STREAMS each step live (with
+# --progress=plain) and drops the "legacy builder is deprecated" warning. The
+# legacy builder instead buffers a long RUN layer (apt/rustup) until the layer
+# finishes, so a first-time/cache-missed image build looks frozen for minutes
+# (the "nothing on console" symptom — the image was building quietly).
+# BUT BuildKit needs the `buildx` component; on installs where it's missing,
+# DOCKER_BUILDKIT=1 makes `docker build` fail outright ("BuildKit is enabled but
+# the buildx component is missing or broken"). So auto-detect: use BuildKit only
+# when `docker buildx version` works, else fall back to the legacy builder. An
+# explicit DOCKER_BUILDKIT in the environment always wins. (To get streaming on a
+# host without it: install the buildx package, e.g. `docker-buildx` on Arch.)
+if [ -z "${DOCKER_BUILDKIT:-}" ]; then
+  if docker buildx version >/dev/null 2>&1; then
+    export DOCKER_BUILDKIT=1
+  else
+    export DOCKER_BUILDKIT=0
+  fi
+fi
+# --progress is a BuildKit-only flag; only pass it when BuildKit is actually on
+# (the legacy builder rejects unknown flags).
+BUILD_PROGRESS=()
+if [ "${DOCKER_BUILDKIT}" = "1" ]; then
+  BUILD_PROGRESS=(--progress=plain)
+fi
+docker build "${BUILD_PROGRESS[@]}" -t "$IMAGE" \
   --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
   "$ROOT/docker"
 
