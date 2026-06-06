@@ -280,7 +280,13 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   combines the per-ABI AARs and publishes via `./mach gradle
   geckoview:publishReleasePublicationToMavenLocal` (publication is named after the
   variant, `release`). A mavenLocal publish carries the **POM with transitive
-  deps** (a bare `.aar` in `app/libs` would miss them).
+  deps** (a bare `.aar` in `app/libs` would miss them). **This phase does NOT use
+  the mozconfig template** — `--disable-compile-environment` makes configure reject
+  the template's compile-only flags (`--disable-rust-tests`, `--enable-strip`, …,
+  "not available in this configuration"), so `04-build.sh` writes a MINIMAL
+  mozconfig: application + release + **`--enable-geckoview-lite`** (required here
+  too, or the fat-AAR publishes `geckoview-omni`) + the fat-AAR inputs. The version
+  pin rides along via the exported `MOZ_BUILD_DATE`.
 - The published **artifactId** must be **`geckoview`** (what the app depends on /
   what we pulled from Mozilla's Maven). `computeArtifactId` appends `-omni` UNLESS
   `MOZ_ANDROID_GECKOVIEW_LITE` — so the mozconfig sets **`--enable-geckoview-lite`**

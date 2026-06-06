@@ -208,18 +208,38 @@ echo "== [phase 2] fat-AAR ($ABI_LIST) + publish to mavenLocal =="
 # Pick any built target as the "host" target for the repackage pass.
 FIRST_T="$(set -- $ANDROID_TARGETS; echo "$1")"
 
-cp "$TEMPLATE" "$MOZCONFIG"
+# Phase 2 is a REPACKAGE (--disable-compile-environment), so it must NOT carry the
+# compile-only options from the template — configure rejects them in this mode
+# ("InvalidOptionError: --disable-rust-tests is not available in this
+# configuration"; same for --enable-strip/--enable-install-strip, etc.). Write a
+# MINIMAL mozconfig from scratch (overwrite, do NOT cp the template) with only the
+# packaging-relevant options:
+#   - --enable-application / --enable-release / --disable-debug / --disable-tests:
+#     confirmed valid with --disable-compile-environment (they evaluate before the
+#     rejected ones) and pin the release variant the publication is named after.
+#   - --enable-geckoview-lite: REQUIRED here too — computeArtifactId runs during
+#     the publish, so without it the fat-AAR would publish `geckoview-omni`, not
+#     `geckoview`. It's a dependency/substs flag, not compile-env-gated.
+#   - the fat-AAR inputs + --disable-compile-environment + target/objdir.
+# The per-ABI AARs are already release+stripped, so strip/crashreporter/etc. don't
+# belong in the repackage. MOZ_BUILD_DATE (version pin) is an exported env var, so
+# it still applies. SDK for the gradle publish: in Docker it's auto-detected from
+# bootstrap; the reuse path isn't exercised here (it hits the glibc wall — use
+# Docker).
 {
-  echo ""
-  echo "# --- injected by 04-build.sh (fat-AAR phase) ---"
-  echo "ac_add_options --target=$FIRST_T"
+  echo "ac_add_options --enable-application=mobile/android"
+  echo "ac_add_options --enable-release"
+  echo "ac_add_options --disable-debug"
+  echo "ac_add_options --disable-tests"
+  echo "ac_add_options --enable-geckoview-lite"
   echo "ac_add_options --disable-compile-environment"   # repackage only, no recompile
+  echo "ac_add_options --target=$FIRST_T"
   echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-fat"
   echo "export MOZ_ANDROID_FAT_AAR_ARCHITECTURES=$ABI_LIST"
   for ABI in "${!AAR_FOR_ABI[@]}"; do
     echo "export $(fatvar_for_abi "$ABI")=${AAR_FOR_ABI[$ABI]}"
   done
-} >> "$MOZCONFIG"
+} > "$MOZCONFIG"
 echo "== fat-AAR mozconfig =="
 cat "$MOZCONFIG"
 echo

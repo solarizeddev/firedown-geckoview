@@ -1,12 +1,13 @@
 # Firedown GeckoView — release build for Android (GeckoView AAR, no browser app).
 #
-# scripts/04-build.sh copies this to <gecko-src>/mozconfig once per ABI (and once
-# more for the fat-AAR repackage pass), appending the per-phase target/objdir so
-# this file stays static. Appended lines look like:
-#     ac_add_options --target=<triple>                 # phase 1, per ABI
-#     mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-<abi>
-#   …and for the fat-AAR phase: --disable-compile-environment +
-#     export MOZ_ANDROID_FAT_AAR_ARCHITECTURES / MOZ_ANDROID_FAT_AAR_<ABI>.
+# scripts/04-build.sh copies this to <gecko-src>/mozconfig once per ABI (phase 1,
+# the real compile), appending `--target=<triple>` + `MOZ_OBJDIR`. This file stays
+# static. The phase-2 fat-AAR repackage does NOT use this template — it's a
+# `--disable-compile-environment` pass, and configure REJECTS the compile-only
+# options below in that mode (--disable-rust-tests, --enable-strip, …), so
+# 04-build.sh writes a separate MINIMAL mozconfig for it (application + release +
+# geckoview-lite + the fat-AAR inputs). Keep compile-only flags here, out of that
+# minimal set.
 
 # --- What we're building -------------------------------------------------------
 ac_add_options --enable-application=mobile/android
