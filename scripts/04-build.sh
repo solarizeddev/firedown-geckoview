@@ -226,6 +226,22 @@ FIRST_T="$(set -- $ANDROID_TARGETS; echo "$1")"
 # it still applies. SDK for the gradle publish: in Docker it's auto-detected from
 # bootstrap; the reuse path isn't exercised here (it hits the glibc wall — use
 # Docker).
+#
+# Host build tools: a --disable-compile-environment Android pass still needs the
+# UniFFI/Nimbus host binaries (HOST_RUST_PROGRAMS: embedded-uniffi-bindgen,
+# nimbus-fml) to assemble the AAR, but can't BUILD them, so configure's check_prog
+# errors ("Cannot find embedded-uniffi-bindgen" / "... nimbus-fml"). check_prog
+# honors a same-named env override, so point both at the copies phase 1 already
+# built in <objdir>/dist/host/bin (they're HOST tools — arch-independent — so
+# either per-ABI objdir's copy works). This is how Mozilla CI feeds the fat-AAR
+# pass too (it fetches the same toolchains); we just reuse what we already built.
+FIRST_ABI="$(abi_for_target "$FIRST_T")"
+FAT_HOSTBIN="$GECKO_SRC/objdir-gv-$FIRST_ABI/dist/host/bin"
+if [ ! -x "$FAT_HOSTBIN/embedded-uniffi-bindgen" ] || [ ! -x "$FAT_HOSTBIN/nimbus-fml" ]; then
+  echo "WARN: host tools not found under $FAT_HOSTBIN (embedded-uniffi-bindgen /" >&2
+  echo "      nimbus-fml). Phase 1 should have produced them; the fat-AAR configure" >&2
+  echo "      will fail without them." >&2
+fi
 {
   echo "ac_add_options --enable-application=mobile/android"
   echo "ac_add_options --enable-release"
@@ -235,6 +251,8 @@ FIRST_T="$(set -- $ANDROID_TARGETS; echo "$1")"
   echo "ac_add_options --disable-compile-environment"   # repackage only, no recompile
   echo "ac_add_options --target=$FIRST_T"
   echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-fat"
+  echo "export EMBEDDED_UNIFFI_BINDGEN=$FAT_HOSTBIN/embedded-uniffi-bindgen"
+  echo "export NIMBUS_FML=$FAT_HOSTBIN/nimbus-fml"
   echo "export MOZ_ANDROID_FAT_AAR_ARCHITECTURES=$ABI_LIST"
   for ABI in "${!AAR_FOR_ABI[@]}"; do
     echo "export $(fatvar_for_abi "$ABI")=${AAR_FOR_ABI[$ABI]}"

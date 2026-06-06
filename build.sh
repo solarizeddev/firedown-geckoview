@@ -7,6 +7,9 @@
 #   ./build.sh patch     # 03  apply Firedown patches (idempotent)
 #   ./build.sh build     # 04  build + publish AAR to mavenLocal
 #   ./build.sh sync      # 05  print app wiring  (add --apply to edit firedown)
+#   ./build.sh publish-abi <triple>   # publish ONE already-built per-ABI AAR to
+#                        #     mavenLocal (skip the fat-AAR) — quick single-ABI
+#                        #     device/emulator test, e.g. publish-abi aarch64-linux-android
 #   ./build.sh all       # fetch → bootstrap → patch → build → sync
 #   ./build.sh docker    #     run `all` (or passed stages) inside the build
 #                        #     container — use this on a too-new-glibc host (Arch),
@@ -25,6 +28,7 @@ case "${1:-all}" in
   patch)     bash "$S/03-apply-patches.sh" ;;
   build)     bash "$S/04-build.sh" ;;
   sync)      shift; bash "$S/05-sync-to-app.sh" "$@" ;;
+  publish-abi) shift; bash "$S/publish-abi.sh" "$@" ;;
   docker)    shift; bash "$ROOT/docker/build-in-docker.sh" "$@" ;;
   all)
     bash "$S/01-fetch-source.sh"

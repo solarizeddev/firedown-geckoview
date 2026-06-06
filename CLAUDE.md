@@ -286,7 +286,19 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   "not available in this configuration"), so `04-build.sh` writes a MINIMAL
   mozconfig: application + release + **`--enable-geckoview-lite`** (required here
   too, or the fat-AAR publishes `geckoview-omni`) + the fat-AAR inputs. The version
-  pin rides along via the exported `MOZ_BUILD_DATE`.
+  pin rides along via the exported `MOZ_BUILD_DATE`. It ALSO needs the
+  `HOST_RUST_PROGRAMS` host tools (`embedded-uniffi-bindgen`, `nimbus-fml`) — a
+  `--disable-compile-environment` Android pass *uses* them to assemble but can't
+  *build* them, so configure's `check_prog` errors ("Cannot find
+  embedded-uniffi-bindgen"). `04-build.sh` sets `EMBEDDED_UNIFFI_BINDGEN` /
+  `NIMBUS_FML` env overrides pointing at the copies **phase 1 already built** in
+  `<per-ABI objdir>/dist/host/bin/` (they're host tools → arch-independent, either
+  objdir's copy works; same tools Mozilla CI fetches for its fat-AAR task).
+- **Quick single-ABI test:** `./build.sh publish-abi <triple>` (e.g.
+  `./build.sh docker publish-abi aarch64-linux-android`) publishes ONE already-built
+  per-ABI AAR to mavenLocal, skipping the fat-AAR entirely — it reuses that ABI's
+  compile-environment objdir (so the host tools are present) and is ideal for
+  testing on a matching device/emulator before the multi-ABI artifact is ready.
 - The published **artifactId** must be **`geckoview`** (what the app depends on /
   what we pulled from Mozilla's Maven). `computeArtifactId` appends `-omni` UNLESS
   `MOZ_ANDROID_GECKOVIEW_LITE` — so the mozconfig sets **`--enable-geckoview-lite`**
