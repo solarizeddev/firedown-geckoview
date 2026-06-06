@@ -263,21 +263,44 @@ cat "$MOZCONFIG"
 echo
 
 ./mach build "${MACH_JOBS[@]}"
-# The fat RELEASE AAR must be ASSEMBLED before it can be published. `./mach build`
-# above drives gradle for the DEBUG variant only (it runs bundleDebugAar +
-# publishDebugPublicationToMavenRepository — Mozilla's default for the example
-# apps), so the RELEASE publication's main artifact (the bundleReleaseAar output)
-# does NOT exist yet. If we jump straight to the publish task it "succeeds" in ~1s
-# but emits only the POM + sources + javadoc — NO .aar — because its main artifact
-# file is simply absent (gradle skips a missing optional artifact rather than
-# building it). So assemble the fat release AAR FIRST (this is the pass where
-# MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR),
-# exactly as phase 1 does per-ABI, THEN publish it. Two separate mach gradle calls
-# so the assemble fully completes (artifact on disk) before the publish reads it.
+# Assemble the fat RELEASE AAR. This is the pass where
+# MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
+# (objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar). The phase-2
+# `./mach build` above only drives gradle for the DEBUG variant, so the release
+# AAR must be built explicitly here, exactly as phase 1 does per-ABI.
 ./mach gradle geckoview:assembleRelease
-# Publication is named after the variant (`release`), not the old flavor — so
-# `publishReleasePublicationToMavenLocal`, not `publishWithGeckoBinariesRelease…`.
+# Publish the `release` publication to mavenLocal. NOTE: GeckoView's release
+# MavenPublication only carries the POM + sources jar + javadoc jar — its publish
+# task graph has NO bundleReleaseAar dependency, so the main .aar is NOT installed
+# by this step (verified: ~/.m2 gets the .pom + -sources/-javadoc jars but no
+# .aar). We still run it because it generates the POM (with GeckoView's transitive
+# deps) and creates the mavenLocal GAV directory we drop the AAR into next.
 ./mach gradle geckoview:publishReleasePublicationToMavenLocal
+
+# Install the assembled fat AAR into the mavenLocal layout by hand, beside the POM
+# the publish just wrote, named <artifactId>-<version>.aar. mavenLocal resolution
+# then finds aar+pom by GAV (a local repo needs no checksums). The artifactId
+# (geckoview / geckoview-default / geckoview-omni — varies by update channel and
+# --enable-geckoview-lite) is read FROM the POM gradle wrote, not hardcoded.
+FAT_AAR="$(find "$GECKO_SRC/objdir-gv-fat" -path '*geckoview*outputs/aar*' \
+             -name 'geckoview*-release.aar' 2>/dev/null | head -1)"
+if [ -z "$FAT_AAR" ] || [ ! -f "$FAT_AAR" ]; then
+  echo "ERROR: fat release AAR not found under objdir-gv-fat after assembleRelease." >&2
+  exit 1
+fi
+M2_GV="${HOME}/.m2/repository/org/mozilla/geckoview"
+INSTALLED=0
+while IFS= read -r POM; do
+  AAR_DST="${POM%.pom}.aar"
+  cp -f "$FAT_AAR" "$AAR_DST"
+  echo "   installed fat AAR -> $AAR_DST"
+  INSTALLED=$((INSTALLED + 1))
+done < <(find "$M2_GV" -path "*/$GECKOVIEW_VERSION/*.pom" 2>/dev/null)
+if [ "$INSTALLED" -eq 0 ]; then
+  echo "ERROR: no published POM found under $M2_GV/*/$GECKOVIEW_VERSION/ —" >&2
+  echo "       the gradle publish step did not create the mavenLocal entry." >&2
+  exit 1
+fi
 
 echo
 echo "[ok] build complete. Multi-ABI ($ABI_LIST) published under"

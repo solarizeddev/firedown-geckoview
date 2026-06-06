@@ -49,16 +49,38 @@ cp "$ROOT/mozconfig/geckoview-release.mozconfig" "$GECKO_SRC/mozconfig"
 } >> "$GECKO_SRC/mozconfig"
 
 echo "== publishing single-ABI ($ABI) geckoview to mavenLocal =="
-# Assemble the release AAR before publishing — the publish task does NOT build it,
-# and publishing without it emits only POM/sources/javadoc (no .aar). Phase 1
-# already ran assembleRelease in this objdir, so this is normally UP-TO-DATE; we
-# run it anyway so a stale/partial objdir still produces the artifact.
+# Assemble the release AAR (this objdir has compile-env, so it builds the real
+# per-ABI AAR). The publish then writes only the POM + sources/javadoc jars —
+# GeckoView's release publication has NO bundleReleaseAar dependency — so we
+# install the .aar by hand afterwards, same as the fat-AAR path in 04-build.sh.
 ./mach gradle geckoview:assembleRelease
 ./mach gradle geckoview:publishReleasePublicationToMavenLocal
 
+# Drop the assembled per-ABI AAR into the mavenLocal layout beside the POM gradle
+# wrote, as <artifactId>-<version>.aar (artifactId read from the POM, not
+# hardcoded). Without this, ~/.m2 has the POM/jars but no .aar and the app can't
+# resolve org.mozilla.geckoview.
+ABI_AAR="$(find "$GECKO_SRC/$OBJ" -path '*geckoview*outputs/aar*' \
+             -name 'geckoview*-release.aar' 2>/dev/null | head -1)"
+if [ -z "$ABI_AAR" ] || [ ! -f "$ABI_AAR" ]; then
+  echo "ERROR: per-ABI release AAR not found under $OBJ after assembleRelease." >&2
+  exit 1
+fi
+M2_GV="${HOME}/.m2/repository/org/mozilla/geckoview"
+INSTALLED=0
+while IFS= read -r POM; do
+  cp -f "$ABI_AAR" "${POM%.pom}.aar"
+  echo "   installed $ABI AAR -> ${POM%.pom}.aar"
+  INSTALLED=$((INSTALLED + 1))
+done < <(find "$M2_GV" -path "*/${GECKOVIEW_VERSION:-}/*.pom" 2>/dev/null)
+if [ "$INSTALLED" -eq 0 ]; then
+  echo "ERROR: no published POM found under $M2_GV/*/${GECKOVIEW_VERSION:-}/." >&2
+  exit 1
+fi
+
 echo
 echo "[ok] published single-ABI ($ABI) geckoview ${GECKOVIEW_VERSION:-} to"
-echo "     ~/.m2/repository/org/mozilla/geckoview/geckoview/"
+echo "     ~/.m2/repository/org/mozilla/geckoview/"
 echo "     Next (on the HOST): ./build.sh sync --apply, then build + adb install the app."
 echo "     NOTE: this AAR carries ONLY $ABI native libs — fine for a matching"
 echo "     device/emulator; use the full fat-AAR for a shippable multi-ABI build."

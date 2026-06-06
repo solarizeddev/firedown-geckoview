@@ -280,17 +280,31 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   combines the per-ABI AARs and publishes via `./mach gradle
   geckoview:publishReleasePublicationToMavenLocal` (publication is named after the
   variant, `release`). A mavenLocal publish carries the **POM with transitive
-  deps** (a bare `.aar` in `app/libs` would miss them). **You MUST run
-  `./mach gradle geckoview:assembleRelease` FIRST** (phase 1 does this per-ABI;
-  phase 2 must too, for the fat release AAR). The `./mach build` in this phase only
-  drives gradle for the DEBUG variant (`bundleDebugAar` +
-  `publishDebugPublicationToMavenRepository`), so the RELEASE publication's main
-  artifact isn't built. Skipping the assemble makes the publish "succeed" in ~1s
-  but emit only **POM + sources + javadoc, no `.aar`** (gradle silently skips the
-  missing optional artifact) — the app then can't resolve `org.mozilla.geckoview`
-  and falls through to Mozilla's Maven (or fails loudly under the exclusiveContent
-  pin). Verify with `unzip -l <aar> | grep classes.jar` after publish. **This phase
-  does NOT use
+  deps** (a bare `.aar` in `app/libs` would miss them). **The `.aar` install is a
+  THREE-STEP dance — the publish task alone does NOT produce a usable artifact:**
+  1. `./mach gradle geckoview:assembleRelease` — builds the fat release AAR
+     (`objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar`); this is
+     the pass where `MOZ_ANDROID_FAT_AAR_ARCHITECTURES` merges every ABI's native
+     libs. The phase-2 `./mach build` only drives the DEBUG variant
+     (`bundleDebugAar` + `publishDebugPublicationToMavenRepository`), so release
+     must be assembled explicitly, exactly as phase 1 does per-ABI.
+  2. `./mach gradle geckoview:publishReleasePublicationToMavenLocal` — writes the
+     POM (transitive deps) + sources/javadoc jars and creates the `~/.m2` GAV dir.
+  3. **`cp` the assembled AAR into `~/.m2` beside that POM**, as
+     `<artifactId>-<version>.aar`. This manual step is REQUIRED: GeckoView's
+     `release` MavenPublication has **no `bundleReleaseAar` dependency**, so the
+     publish installs only the POM + sources + javadoc — **never the `.aar`**
+     (verified in the build log: the publish task graph lists
+     `generatePomFileForReleasePublication`/`sourcesJarRelease`/`javadocJarRelease`
+     and no AAR task). Without the `cp`, `~/.m2` has everything but the `.aar`, so
+     the app can't resolve `org.mozilla.geckoview` (and falls through to Mozilla's
+     Maven, or fails loudly under the app's `exclusiveContent` pin). Don't "fix"
+     this by re-running assemble — assembling works; the *publication* just omits
+     the artifact. `04-build.sh` reads the artifactId from the POM gradle wrote
+     (don't hardcode `geckoview-default` — it changes with channel/lite). Verify
+     with `unzip -l <aar> | grep classes.jar` after the build.
+
+  **This phase does NOT use
   the mozconfig template** — `--disable-compile-environment` makes configure reject
   the template's compile-only flags (`--disable-rust-tests`, `--enable-strip`, …,
   "not available in this configuration"), so `04-build.sh` writes a MINIMAL
