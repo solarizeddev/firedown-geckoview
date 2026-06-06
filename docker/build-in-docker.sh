@@ -43,7 +43,19 @@ if [ "$#" -eq 0 ]; then
 fi
 
 echo "== running: ./build.sh $* (in container) =="
-exec docker run --rm -it \
+# Allocate an interactive TTY ONLY when our own stdin+stdout are real terminals.
+# `-t` needs a terminal; if you pipe/redirect this command (e.g. `| tee build.log`,
+# `> log`, nohup, CI), passing `-t` makes docker abort with "the input device is
+# not a TTY" — which looks like the build "logs nothing". Detect it: interactive
+# (live mach/gradle progress UI) when attached to a terminal, pipe-friendly plain
+# line output when redirected. PYTHONUNBUFFERED keeps mach's Python output
+# line-flushed so a piped run streams live instead of block-buffering to the end.
+DOCKER_TTY=()
+if [ -t 0 ] && [ -t 1 ]; then
+  DOCKER_TTY=(-it)
+fi
+exec docker run --rm "${DOCKER_TTY[@]}" \
+  -e PYTHONUNBUFFERED=1 \
   -v "$ROOT":/work/src \
   -v "$BUILDDIR/gecko":/work/src/gecko \
   -v "$BUILDDIR/mozbuild":/home/builder/.mozbuild \
