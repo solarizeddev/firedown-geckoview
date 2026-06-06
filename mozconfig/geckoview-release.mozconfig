@@ -15,6 +15,16 @@ ac_add_options --disable-debug
 ac_add_options --disable-tests
 ac_add_options --disable-rust-tests
 
+# GeckoView "Lite" build. Two reasons:
+#   1. artifactId is `geckoview` (NOT `geckoview-omni`) — Gecko's computeArtifactId
+#      appends `-omni` UNLESS this is set. The firedown app depends on
+#      `org.mozilla.geckoview:geckoview`, and this matches the coordinate we used
+#      to pull from Mozilla's Maven, so 05-sync wires the same artifactId.
+#   2. The option's own help: "Removes unnecessary dependencies like Glean" — so
+#      lite mode drops the Glean telemetry dep, shrinking the AAR (belt-and-
+#      suspenders with patch 0004's FOG endpoint neuter + the telemetry prefs).
+ac_add_options --enable-geckoview-lite
+
 # --- Shrink the shipped binaries (strip symbols) -------------------------------
 # libxul.so is by far the dominant APK weight; UNSTRIPPED it can be ~1 GB, and
 # stripped only ~100-200 MB. A local --enable-release build does NOT strip by

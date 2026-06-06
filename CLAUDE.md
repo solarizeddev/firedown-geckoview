@@ -55,7 +55,7 @@ patch is gated on a marker or canonical content):
 | pref append | `firedown/patches/0002-default-prefs.sh` + `firedown/prefs/firedown-geckoview.js` | Append default prefs (DRM-off, telemetry-off, Pocket/sponsored-off, hardened privacy, plus IronFox-derived connection/add-on-probe + phone-home-endpoint prefs) to `mobile/android/app/geckoview-prefs.js`. Marker `FIREDOWN-GECKO-PREFS`. |
 | Java/C++ edit | `firedown/patches/0003-disable-network-id.sh` | Make `nsAndroidNetworkLinkService::GetNetworkID` return an empty network ID (drops the network-change fingerprint/correlation signal). IronFox-derived (`gecko-disable-network-id`), Android-only. Marker `FIREDOWN-NETWORK-ID`. **Fails loudly** if the method body anchor moved. |
 | Rust edit | `firedown/patches/0004-noop-glean-endpoints.sh` | Blank the Glean/FOG telemetry + OHTTP **upload endpoints** in `toolkit/components/glean/src/init/{mod.rs,viaduct_uploader.rs}` (→ `""`), so the compiled-in telemetry SDK has nowhere to POST. Defense-in-depth atop the runtime `uploadEnabled=false` pref; mirrors IronFox's `noop_mozilla_endpoints.sh` for the FOG layer. Marker `FIREDOWN-GLEAN-NOOP`. **Fails loudly** if an endpoint string moved. |
-| build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
+| build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--enable-geckoview-lite` (artifactId `geckoview` not `geckoview-omni`, and drops the Glean dep), `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
 can still override at runtime, so nothing hard-conflicts); **build flags** remove
@@ -120,10 +120,12 @@ removal; until then the pref is load-bearing. (Update the modifications table's
 
 ## Telemetry / Glean — compiled in, neutered two ways
 
-Glean (the Rust `glean-core` + `firefox-on-glean`/FOG) **compiles into GeckoView**
-— it's wired through thousands of instrumentation call sites, so there's no build
-flag to remove it (you'll see `glean-core` / `firefox-on-glean` compile, that's
-expected). It's neutered on two layers:
+Glean (the Rust `glean-core` + `firefox-on-glean`/FOG) is Mozilla's telemetry SDK.
+**`--enable-geckoview-lite` (set in the mozconfig) drops the Glean dependency** —
+its help is literally "Removes unnecessary dependencies like Glean" — so the lite
+AAR shouldn't carry it. (FOG is wired through many call sites; if a future change
+still pulls some of it in, it stays neutered by the two layers below.) It's
+neutered on two more layers regardless:
 1. **Runtime pref** — `datareporting.healthreport.uploadEnabled=false` (Glean's
    master upload switch) + `toolkit.telemetry.*` off, in `firedown-geckoview.js`.
    From a fresh profile that's never enabled, Glean collects/sends nothing (not
@@ -251,11 +253,13 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   geckoview:publishReleasePublicationToMavenLocal` (publication is named after the
   variant, `release`). A mavenLocal publish carries the **POM with transitive
   deps** (a bare `.aar` in `app/libs` would miss them).
-- The published **artifactId** is `geckoview` (lite) or `geckoview-omni`
-  (`computeArtifactId`: `-omni` unless `MOZ_ANDROID_GECKOVIEW_LITE`; the app
-  references `geckoview`/lite). `05-sync-to-app.sh` detects whatever was published
-  from `~/.m2` rather than hardcoding, and prints/edits the app's
-  `settings.gradle` (`mavenLocal()`) + `app/build.gradle` (the geckoview line).
+- The published **artifactId** must be **`geckoview`** (what the app depends on /
+  what we pulled from Mozilla's Maven). `computeArtifactId` appends `-omni` UNLESS
+  `MOZ_ANDROID_GECKOVIEW_LITE` — so the mozconfig sets **`--enable-geckoview-lite`**
+  to get `geckoview` (without it you'd publish `geckoview-omni` and the app
+  wouldn't resolve). `05-sync-to-app.sh` still detects whatever was published from
+  `~/.m2` rather than hardcoding, and prints/edits the app's `settings.gradle`
+  (`mavenLocal()`) + `app/build.gradle` (the geckoview line).
 
 ## After changing a patch / bumping the version
 
