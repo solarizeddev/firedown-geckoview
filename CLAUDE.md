@@ -57,6 +57,7 @@ patch is gated on a marker or canonical content):
 | Rust edit | `firedown/patches/0004-noop-glean-endpoints.sh` | Blank the Glean/FOG telemetry + OHTTP **upload endpoints** in `toolkit/components/glean/src/init/{mod.rs,viaduct_uploader.rs}` (→ `""`), so the compiled-in telemetry SDK has nowhere to POST. Defense-in-depth atop the runtime `uploadEnabled=false` pref; mirrors IronFox's `noop_mozilla_endpoints.sh` for the FOG layer. Marker `FIREDOWN-GLEAN-NOOP`. **Fails loudly** if an endpoint string moved. |
 | C++ edit | `firedown/patches/0005-prevent-fp-via-chrome-resources.sh` | In `nsScriptSecurityManager::CheckLoadURIFlags`, deny an http/https page loading the build's `chrome://` UI resources (fingerprint probe). IronFox-derived (`gecko-prevent-fingerprinting-via-chrome-resources`) but **self-contained** — a `SchemeIs` source check (no `nsINetUtil`/extra `#include`) + generic resource-prefix allowlist (no IronFox branding paths). Marker `FIREDOWN-CHROME-FP`. **Fails loudly** if the anchor moved. |
 | C++ edit | `firedown/patches/0006-serviceworker-webrequest-visibility.sh` | Fire `http-on-examine-response` from `InterceptedHttpChannel::OnStartRequest` so **ServiceWorker-synthesized responses become visible to `webRequest`** (`onHeadersReceived` + `filterResponseData`) — a capture-reach patch (NOT IronFox; ours). Marker `FIREDOWN-SW-WEBREQUEST`. **Fails loudly** if the anchor moved. See "ServiceWorker capture" below. |
+| Java + build edit | `firedown/patches/0007-webauthn-drop-gms-fido.sh` | Remove the GMS FIDO (`play-services-fido`) **runtime** dependency entirely (complements `0001`). Makes `WebAuthnTokenManager`'s `SUPPORTED_ALGORITHMS` lazy (the `<clinit>` GMS load that crashed) and `if (true)`-guards the three live GMS entry points (`isUVPAA`, `makeCredential`/`getAssertion` GMS fallbacks) so no GMS code runs; flips `geckoview/build.gradle` `play-services-fido` to `compileOnly` (compiles, not bundled). The app then drops the dep → **zero Google FIDO binary in the APK**, WebAuthn is Credential-Manager-only. Marker `FIREDOWN-WEBAUTHN-NOGMS`. **Fails loudly** if any anchor moved. See WebAuthn section. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--enable-geckoview-lite` (artifactId `geckoview` not `geckoview-omni`, and drops the Glean dep), `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
@@ -184,32 +185,42 @@ the prebuilt-AAR route can't fix it (the constant is compiled in) and a source
 build can. See the app repo's CLAUDE.md "passkey/WebAuthn" notes for the full
 investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it).
 
-### The consuming app MUST still bundle play-services-fido (link-only)
+### play-services-fido: gone entirely as of `0007` (was a load-only requirement)
 
-`0001` routes WebAuthn to Credential Manager at **runtime**, so the GMS FIDO2 API
-is never *called* — but it does **not** remove `WebAuthnTokenManager`'s compile-time
-*references* to GMS FIDO types. The class has static fields
-(`SUPPORTED_ALGORITHMS = {EC2Algorithm…, RSAAlgorithm…}`, `com.google.android.gms.
-fido.fido2.api.common.Algorithm[]`), so the **class can't even load** without
-`com.google.android.gms:play-services-fido` on the classpath. If the app excludes
-it (tempting, since "we use Credential Manager, not GMS FIDO"), the first WebAuthn
-trigger (e.g. accounts.google.com) loads `WebAuthnTokenManager`, its `<clinit>`
-throws `NoClassDefFoundError: …fido…Algorithm`, the **native** caller
-(`GeckoLoader.nativeRun`) doesn't handle the Java exception, and libxul **SIGSEGVs**
-— a native crash whose real cause is a missing Java class. (Cost us a detour
-chasing the native stack — it was the symptom, not the cause.)
+History worth keeping: `0001` routes WebAuthn to Credential Manager at runtime, so
+the GMS FIDO2 API is never *called* — but it did **not** remove
+`WebAuthnTokenManager`'s compile-time *references* to GMS FIDO types. The killer was
+the static field `SUPPORTED_ALGORITHMS = {EC2Algorithm…, RSAAlgorithm…}`: a static
+initializer runs at `<clinit>`, so the class couldn't even **load** without
+`play-services-fido` on the classpath — the first WebAuthn trigger
+(accounts.google.com) threw `NoClassDefFoundError: …fido…Algorithm` in `<clinit>`,
+the native caller didn't handle it, and libxul **SIGSEGV**'d (a native crash whose
+real cause was a missing Java class — don't chase the native stack). The stopgap was
+for the **app** to bundle `play-services-fido:21.2.0` link-only (classes present so
+the class loads; CredManager still runs; no GMS called).
 
-So the app keeps `implementation "com.google.android.gms:play-services-fido:<v>"`
-(match GeckoView's version catalog — 21.2.0 for 151) as a **link-only** dep: the
-classes are bundled so the class loads, `<clinit>` runs (building unused Algorithm
-constants), and then `0001`'s gate routes to Credential Manager — the GMS FIDO2 API
-is never invoked, so **no Google Play Services is required on-device** and privacy
-is intact. This is *not* a regression of `0001`; the two are complementary (`0001`
-= don't *call* GMS FIDO; the dep = let the class *load*). The fully GMS-free
-alternative would be a deeper Java patch removing the static GMS FIDO references
-(or a microG `play-services-fido` stub) — not done; the link-only real lib is the
-low-risk path. R8 also needs the lib present (or `-dontwarn com.google.android.gms.
-fido.**`/`.tasks.**`) so release minification doesn't fail on the references.
+**`0007` removes the dependency for real** so the APK ships **zero Google FIDO
+binary**: it makes `SUPPORTED_ALGORITHMS` lazy (no GMS at `<clinit>` → class loads)
+and `if (true)`-guards the three GMS code paths that are actually *live* on a
+non-official build — `webAuthnIsUserVerifyingPlatformAuthenticatorAvailable`
+(always GMS; what accounts.google.com hits on load), and the `makeCredential`/
+`getAssertion` **GMS fallbacks** the CredManager wrappers drop to. Everything else
+GMS (`getRequestOptionsFor*`, `parseErrorResponse`, the GMS body of
+`hasCredentialInGMS` [`0001` returns before it], `WebAuthnUtils.getTransportsForByte`)
+is then reachable only from dead code; ART soft-fails dead methods that reference
+absent classes, so the class still loads. `geckoview/build.gradle` flips
+`play-services-fido` to `compileOnly` (compiles, not bundled/declared).
+
+Net behaviour: WebAuthn is **Credential-Manager-only**; `isUVPAA` reports available
+(sites offer passkeys, CredManager runs the ceremony); the GMS fallback — which
+never worked for an indie fork anyway (the allowlist rejection `0001` exists for) —
+returns `NOT_SUPPORTED_ERR` instead of crashing. **The app drops its
+`play-services-fido` dep** (both sides must drop it — the app bundling it would put
+the classes back in the APK). **Keep the app's `-dontwarn com.google.android.gms.
+fido.**`/`.tasks.**`** though: GeckoView's `classes.jar` still *contains* the dead
+methods referencing GMS, so the app's release R8 still sees the (now-absent)
+references and would fail without the rule. Re-verify `0007`'s anchors on a Firefox
+bump — `WebAuthnTokenManager.java` is the kind of file that drifts.
 
 ## Skip-bootstrap toolchain compensations (reuse-existing-SDK/NDK path)
 
