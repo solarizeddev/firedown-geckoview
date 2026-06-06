@@ -49,6 +49,11 @@ cp "$ROOT/mozconfig/geckoview-release.mozconfig" "$GECKO_SRC/mozconfig"
 } >> "$GECKO_SRC/mozconfig"
 
 echo "== publishing single-ABI ($ABI) geckoview to mavenLocal =="
+# Assemble the release AAR before publishing — the publish task does NOT build it,
+# and publishing without it emits only POM/sources/javadoc (no .aar). Phase 1
+# already ran assembleRelease in this objdir, so this is normally UP-TO-DATE; we
+# run it anyway so a stale/partial objdir still produces the artifact.
+./mach gradle geckoview:assembleRelease
 ./mach gradle geckoview:publishReleasePublicationToMavenLocal
 
 echo

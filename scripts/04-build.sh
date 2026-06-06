@@ -263,6 +263,18 @@ cat "$MOZCONFIG"
 echo
 
 ./mach build "${MACH_JOBS[@]}"
+# The fat RELEASE AAR must be ASSEMBLED before it can be published. `./mach build`
+# above drives gradle for the DEBUG variant only (it runs bundleDebugAar +
+# publishDebugPublicationToMavenRepository — Mozilla's default for the example
+# apps), so the RELEASE publication's main artifact (the bundleReleaseAar output)
+# does NOT exist yet. If we jump straight to the publish task it "succeeds" in ~1s
+# but emits only the POM + sources + javadoc — NO .aar — because its main artifact
+# file is simply absent (gradle skips a missing optional artifact rather than
+# building it). So assemble the fat release AAR FIRST (this is the pass where
+# MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR),
+# exactly as phase 1 does per-ABI, THEN publish it. Two separate mach gradle calls
+# so the assemble fully completes (artifact on disk) before the publish reads it.
+./mach gradle geckoview:assembleRelease
 # Publication is named after the variant (`release`), not the old flavor — so
 # `publishReleasePublicationToMavenLocal`, not `publishWithGeckoBinariesRelease…`.
 ./mach gradle geckoview:publishReleasePublicationToMavenLocal
