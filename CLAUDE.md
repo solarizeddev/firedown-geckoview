@@ -289,19 +289,27 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
      (`bundleDebugAar` + `publishDebugPublicationToMavenRepository`), so release
      must be assembled explicitly, exactly as phase 1 does per-ABI.
   2. `./mach gradle geckoview:publishReleasePublicationToMavenLocal` — writes the
-     POM (transitive deps) + sources/javadoc jars and creates the `~/.m2` GAV dir.
-  3. **`cp` the assembled AAR into `~/.m2` beside that POM**, as
-     `<artifactId>-<version>.aar`. This manual step is REQUIRED: GeckoView's
-     `release` MavenPublication has **no `bundleReleaseAar` dependency**, so the
-     publish installs only the POM + sources + javadoc — **never the `.aar`**
-     (verified in the build log: the publish task graph lists
+     POM + sources/javadoc jars and creates the `~/.m2` GAV dir.
+  3. **`cp` the assembled AAR into `~/.m2` beside that POM** (as
+     `<artifactId>-<version>.aar`) **AND rewrite the POM's
+     `<packaging>pom</packaging>` → `<packaging>aar</packaging>`.** BOTH are
+     required: GeckoView's `release` MavenPublication has **no `bundleReleaseAar`
+     dependency**, so the publish installs only the POM + sources + javadoc —
+     **never the `.aar`** (verified in the build log: the publish task graph lists
      `generatePomFileForReleasePublication`/`sourcesJarRelease`/`javadocJarRelease`
-     and no AAR task). Without the `cp`, `~/.m2` has everything but the `.aar`, so
-     the app can't resolve `org.mozilla.geckoview` (and falls through to Mozilla's
+     and no AAR task). And because no main artifact was attached, maven-publish
+     stamps the POM `<packaging>pom</packaging>` — so even with the `.aar` on disk,
+     gradle treats the module as **metadata-only** and never resolves it (consumer:
+     `package org.mozilla.geckoview does not exist`, despite a 164 MB AAR sitting
+     right there). The `sed` to `aar` makes gradle resolve `<artifactId>-<ver>.aar`
+     as the main artifact (AGP registers the `aar` type; no `.module` is produced,
+     so the POM is authoritative; mavenLocal needs no checksums). Without BOTH the
+     app can't resolve `org.mozilla.geckoview` (and falls through to Mozilla's
      Maven, or fails loudly under the app's `exclusiveContent` pin). Don't "fix"
      this by re-running assemble — assembling works; the *publication* just omits
-     the artifact. `04-build.sh` reads the artifactId from the POM gradle wrote
-     (don't hardcode `geckoview-default` — it changes with channel/lite). Verify
+     the artifact and mislabels the packaging. `04-build.sh` reads the artifactId
+     from the POM gradle wrote (don't hardcode `geckoview-default` — it changes
+     with channel/lite). Verify
      with `unzip -l <aar> | grep classes.jar` after the build.
 
   **This phase does NOT use

@@ -70,7 +70,11 @@ M2_GV="${HOME}/.m2/repository/org/mozilla/geckoview"
 INSTALLED=0
 while IFS= read -r POM; do
   cp -f "$ABI_AAR" "${POM%.pom}.aar"
-  echo "   installed $ABI AAR -> ${POM%.pom}.aar"
+  # Rewrite <packaging>pom</packaging> -> aar so gradle resolves the .aar we placed
+  # (the publish attaches no main artifact, so the POM defaults to packaging=pom →
+  # the app can't resolve org.mozilla.geckoview). Same fix as 04-build.sh.
+  sed -i 's#<packaging>pom</packaging>#<packaging>aar</packaging>#' "$POM"
+  echo "   installed $ABI AAR -> ${POM%.pom}.aar (POM packaging -> aar)"
   INSTALLED=$((INSTALLED + 1))
 done < <(find "$M2_GV" -path "*/${GECKOVIEW_VERSION:-}/*.pom" 2>/dev/null)
 if [ "$INSTALLED" -eq 0 ]; then

@@ -293,7 +293,15 @@ INSTALLED=0
 while IFS= read -r POM; do
   AAR_DST="${POM%.pom}.aar"
   cp -f "$FAT_AAR" "$AAR_DST"
-  echo "   installed fat AAR -> $AAR_DST"
+  # The publish attached no main artifact, so maven-publish wrote the POM with
+  # <packaging>pom</packaging> — gradle then treats the module as metadata-only and
+  # NEVER resolves the .aar we just placed (consumer: "package org.mozilla.geckoview
+  # does not exist"). Rewrite packaging to `aar` so gradle resolves
+  # <artifactId>-<version>.aar as the module's main artifact (the Android gradle
+  # plugin registers the `aar` type). No .module file is produced here, so the POM
+  # is authoritative; mavenLocal needs no checksums.
+  sed -i 's#<packaging>pom</packaging>#<packaging>aar</packaging>#' "$POM"
+  echo "   installed fat AAR -> $AAR_DST (POM packaging -> aar)"
   INSTALLED=$((INSTALLED + 1))
 done < <(find "$M2_GV" -path "*/$GECKOVIEW_VERSION/*.pom" 2>/dev/null)
 if [ "$INSTALLED" -eq 0 ]; then
