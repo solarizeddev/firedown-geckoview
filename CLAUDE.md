@@ -56,6 +56,7 @@ patch is gated on a marker or canonical content):
 | Java/C++ edit | `firedown/patches/0003-disable-network-id.sh` | Make `nsAndroidNetworkLinkService::GetNetworkID` return an empty network ID (drops the network-change fingerprint/correlation signal). IronFox-derived (`gecko-disable-network-id`), Android-only. Marker `FIREDOWN-NETWORK-ID`. **Fails loudly** if the method body anchor moved. |
 | Rust edit | `firedown/patches/0004-noop-glean-endpoints.sh` | Blank the Glean/FOG telemetry + OHTTP **upload endpoints** in `toolkit/components/glean/src/init/{mod.rs,viaduct_uploader.rs}` (→ `""`), so the compiled-in telemetry SDK has nowhere to POST. Defense-in-depth atop the runtime `uploadEnabled=false` pref; mirrors IronFox's `noop_mozilla_endpoints.sh` for the FOG layer. Marker `FIREDOWN-GLEAN-NOOP`. **Fails loudly** if an endpoint string moved. |
 | C++ edit | `firedown/patches/0005-prevent-fp-via-chrome-resources.sh` | In `nsScriptSecurityManager::CheckLoadURIFlags`, deny an http/https page loading the build's `chrome://` UI resources (fingerprint probe). IronFox-derived (`gecko-prevent-fingerprinting-via-chrome-resources`) but **self-contained** — a `SchemeIs` source check (no `nsINetUtil`/extra `#include`) + generic resource-prefix allowlist (no IronFox branding paths). Marker `FIREDOWN-CHROME-FP`. **Fails loudly** if the anchor moved. |
+| C++ edit | `firedown/patches/0006-serviceworker-webrequest-visibility.sh` | Fire `http-on-examine-response` from `InterceptedHttpChannel::OnStartRequest` so **ServiceWorker-synthesized responses become visible to `webRequest`** (`onHeadersReceived` + `filterResponseData`) — a capture-reach patch (NOT IronFox; ours). Marker `FIREDOWN-SW-WEBREQUEST`. **Fails loudly** if the anchor moved. See "ServiceWorker capture" below. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--enable-geckoview-lite` (artifactId `geckoview` not `geckoview-omni`, and drops the Glean dep), `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
@@ -144,6 +145,31 @@ technique that maps onto our build is the FOG endpoint neuter, which is exactly
 what `0004` does. IronFox sets **no** `datareporting.*`/`toolkit.telemetry.*` prefs
 (it relies on the structural removal); we keep the prefs **and** add the source
 neuter, so our build is strictly at-or-beyond IronFox on actual Glean behavior.
+
+## ServiceWorker capture visibility (`0006`) — a capture-reach patch
+
+This one is **ours, not IronFox**, and it's for the downloader's media capture, not
+privacy. A page's ServiceWorker can answer a `fetch` from its Cache or with a
+constructed `Response` (`event.respondWith`); that response never hits the
+network. The **request** side is already visible to `webRequest` — the
+originating `nsHttpChannel` fires `http-on-modify-request` *before* it internally
+redirects to the `InterceptedHttpChannel` that runs the SW — so `onBeforeRequest`
+already sees a SW-fetch URL. But the **response** side is invisible:
+`InterceptedHttpChannel` pumps the synthesized body straight to its listener and
+**never fires `http-on-examine-response`**, so `onHeadersReceived` doesn't fire
+and `filterResponseData` is never offered. That's the engine reason the app needs
+per-site page-world injects to read SW-served bodies (the TikTok item_list JSON).
+
+`0006` adds the one notification `nsHttpChannel` already makes, in
+`InterceptedHttpChannel::OnStartRequest` just before `mListener->OnStartRequest`:
+`gHttpHandler->OnExamineResponse(static_cast<nsIHttpChannel*>(this))`. That funnel
+covers both the `respondWith` and pre-synthesized-body paths; the
+reset-to-network fallthrough redirects to a *different* channel and never reaches
+here, so no double-notification. **Caveat:** header visibility (`onHeadersReceived`)
+is low-risk; `filterResponseData` over the synthesized stream is the higher-risk,
+higher-value part (it's what lets the app read SW response bodies) and wants
+on-device validation before any per-site inject is retired in its favour — the
+patch *enables* that migration, it doesn't perform it. Cannot be done app-side.
 
 ## WebAuthn → Credential Manager (the important patch)
 
