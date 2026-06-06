@@ -185,6 +185,35 @@ the prebuilt-AAR route can't fix it (the constant is compiled in) and a source
 build can. See the app repo's CLAUDE.md "passkey/WebAuthn" notes for the full
 investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it).
 
+### What actually makes passkeys prompt (the full chain — don't stop at 0001)
+
+Getting a provider prompt took FOUR things, not just `0001`. Learned on-device the
+hard way (passkeys "should work" after `0001` but didn't):
+
+1. **`0001` is effectively a NO-OP for our build.** In FF151 the only
+   `if (!BuildConfig.MOZILLA_OFFICIAL)` gate is in `hasCredentialInGMS`, and for a
+   **non-official** build (ours) `!MOZILLA_OFFICIAL` is *already* true — so the
+   CredManager path is the default with or without `0001`. `0001` only matters for
+   an official build (and is harmless to keep). Don't expect `0001` alone to "turn
+   on" passkeys here; it doesn't change our routing.
+2. **`0007`** — without it `WebAuthnTokenManager` can't even class-load (`<clinit>`
+   GMS static field) → native SIGSEGV before any prompt. See the `0007` notes.
+3. **The app must hold `CREDENTIAL_MANAGER_SET_ORIGIN`** (manifest).
+   `WebAuthnCredentialManager.prepareGetAssertion`/`makeCredential` call
+   `setOrigin(websiteOrigin)` to act on behalf of the page — a privileged op. With
+   the permission absent, `setOrigin` throws `SecurityException`, which GeckoView
+   **swallows** (`catch SecurityException → return null`) → null handle → no
+   `getCredential()` → **provider never prompts** (symptom: the site shows "your
+   device will ask for fingerprint…" then nothing; IronFox prompts on the same
+   device because it declares the permission). Firedown's manifest now declares
+   `CREDENTIAL_MANAGER_SET_ORIGIN` + `CREDENTIAL_MANAGER_QUERY_CANDIDATE_CREDENTIALS`
+   (install-time, like Fenix/IronFox). This was the actual last blocker — an
+   app-manifest fix, no engine change.
+4. Device must be **API 34+** with a Credential Manager provider configured
+   (`WebAuthnCredentialManager` hard-gates on `UPSIDE_DOWN_CAKE` +
+   `FEATURE_CREDENTIALS`). On a provider-less / pre-34 device there is no prompt
+   and (post-`0007`) no GMS fallback — by design.
+
 ### play-services-fido: gone entirely as of `0007` (was a load-only requirement)
 
 History worth keeping: `0001` routes WebAuthn to Credential Manager at runtime, so
