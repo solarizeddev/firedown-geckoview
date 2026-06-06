@@ -184,6 +184,33 @@ the prebuilt-AAR route can't fix it (the constant is compiled in) and a source
 build can. See the app repo's CLAUDE.md "passkey/WebAuthn" notes for the full
 investigation (the GMS allowlist rejection, why reflection/prefs can't bypass it).
 
+### The consuming app MUST still bundle play-services-fido (link-only)
+
+`0001` routes WebAuthn to Credential Manager at **runtime**, so the GMS FIDO2 API
+is never *called* — but it does **not** remove `WebAuthnTokenManager`'s compile-time
+*references* to GMS FIDO types. The class has static fields
+(`SUPPORTED_ALGORITHMS = {EC2Algorithm…, RSAAlgorithm…}`, `com.google.android.gms.
+fido.fido2.api.common.Algorithm[]`), so the **class can't even load** without
+`com.google.android.gms:play-services-fido` on the classpath. If the app excludes
+it (tempting, since "we use Credential Manager, not GMS FIDO"), the first WebAuthn
+trigger (e.g. accounts.google.com) loads `WebAuthnTokenManager`, its `<clinit>`
+throws `NoClassDefFoundError: …fido…Algorithm`, the **native** caller
+(`GeckoLoader.nativeRun`) doesn't handle the Java exception, and libxul **SIGSEGVs**
+— a native crash whose real cause is a missing Java class. (Cost us a detour
+chasing the native stack — it was the symptom, not the cause.)
+
+So the app keeps `implementation "com.google.android.gms:play-services-fido:<v>"`
+(match GeckoView's version catalog — 21.2.0 for 151) as a **link-only** dep: the
+classes are bundled so the class loads, `<clinit>` runs (building unused Algorithm
+constants), and then `0001`'s gate routes to Credential Manager — the GMS FIDO2 API
+is never invoked, so **no Google Play Services is required on-device** and privacy
+is intact. This is *not* a regression of `0001`; the two are complementary (`0001`
+= don't *call* GMS FIDO; the dep = let the class *load*). The fully GMS-free
+alternative would be a deeper Java patch removing the static GMS FIDO references
+(or a microG `play-services-fido` stub) — not done; the link-only real lib is the
+low-risk path. R8 also needs the lib present (or `-dontwarn com.google.android.gms.
+fido.**`/`.tasks.**`) so release minification doesn't fail on the references.
+
 ## Skip-bootstrap toolchain compensations (reuse-existing-SDK/NDK path)
 
 Setting `ANDROID_SDK_ROOT`/`ANDROID_NDK_ROOT` in `config/build.env` (they also
