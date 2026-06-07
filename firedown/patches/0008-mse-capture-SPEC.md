@@ -1,9 +1,18 @@
 # 0008 — Magic Record (MSE source-quality capture) — SPEC / design-of-record
 
-Status: **0008a SHIPPED (inert); 0008b/0008c DESIGNED.** This is the authoritative
-design for the "Magic Record" capture, spanning the GeckoView patch set
-(`firedown-geckoview`) and the app wiring (`firedown`). It supersedes the earlier
-A-vs-B hedge — the sink design is now decided (see §2/§9).
+Status: **content-side SHIPPED & verified (0008a sink+tap, 0008b manager, 0008c
+parent-bridge, 0008e end-of-stream), inert until wired; IPC + GeckoView halves are
+guides to apply on the tree (0008c-WIRING, 0008d-WIRING).** Authoritative design for
+"Magic Record", spanning the GeckoView patch set (`firedown-geckoview`) and the app
+wiring (`firedown`). The sink design is decided (see §2/§9).
+
+Part map (in `firedown/patches/`):
+- `0008a-…sink-and-tap.sh` — ✅ sink + `SourceBuffer::AppendData` tap (verified).
+- `0008b-…manager.sh` — ✅ registry + arm/stop + completion aggregation (verified).
+- `0008c-…ipc.sh` — ✅ parent-side completion bridge + EXPORTS (verified).
+- `0008c-WIRING.md` — ⚠ `PContent`/`ContentChild`/`ContentParent` messages+handlers (apply on tree).
+- `0008d-WIRING.md` — ⚠ GeckoView Java/JNI `startMediaCapture` + session→ContentParent resolve + EventDispatcher (apply on tree); app-side integration.
+- `0008e-…endofstream.sh` — ✅ clean `endOfStream` → finalize COMPLETE (verified).
 
 ---
 
