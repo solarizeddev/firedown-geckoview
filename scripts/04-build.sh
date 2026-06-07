@@ -310,6 +310,117 @@ if [ "$INSTALLED" -eq 0 ]; then
   exit 1
 fi
 
+# Inject GeckoView's transitive runtime dependencies into the POM. The publish
+# wrote a POM with an EMPTY <dependencies> (no release component attached), so —
+# unlike Mozilla's official POM — consumers get none of GeckoView's deps. Without
+# this every dep the app doesn't already provide must be hand-pinned in the app's
+# build.gradle, and a Firefox bump silently adds new ones (we hit androidx.core,
+# snakeyaml, media3-exoplayer-hls one crash at a time). Write the real list here so
+# the artifact is self-contained, exactly like Mozilla's.
+#
+# What goes in: GeckoView-specific, version-SAFE deps only — the media3 set +
+# snakeyaml. DELIBERATELY EXCLUDED: `play-services-fido` (patch 0007 removed it —
+# injecting it re-adds the Google FIDO binary), the `exoplayer2` project dep (not in
+# the lite build), AND all androidx (annotation/collection/core/lifecycle) — see the
+# python `WANT` note: GeckoView 151's catalog pins androidx NEWER than the app's
+# compileSdk 36 (core 1.18.0 → needs 36.1), so injecting it would override the app's
+# compileSdk-36-safe core 1.17.0 pin and break the build. Versions resolve from
+# gradle/libs.versions.toml at publish time (self-updating); fail loud if an alias
+# stops resolving (catalog changed → re-verify WANT vs build.gradle on a FF bump).
+# After this the app may drop its snakeyaml + media3-exoplayer-hls pins; it KEEPS its
+# androidx.core + media3-exoplayer pins (the app needs those exact versions for
+# compileSdk 36 / its own player, independent of GeckoView).
+python3 - "$GECKO_SRC" "$M2_GV" "$GECKOVIEW_VERSION" <<'PY'
+import sys, os, re, glob
+gecko, m2gv, ver = sys.argv[1], sys.argv[2], sys.argv[3]
+toml_path = os.path.join(gecko, 'gradle', 'libs.versions.toml')
+gv_build  = os.path.join(gecko, 'mobile', 'android', 'geckoview', 'build.gradle')
+toml = open(toml_path, encoding='utf-8').read()
+
+def section(name):
+    m = re.search(r'(?ms)^\[' + re.escape(name) + r'\]\s*\n(.*?)(?=^\[|\Z)', toml)
+    return m.group(1) if m else ''
+
+versions = {}
+for line in section('versions').splitlines():
+    mm = re.match(r'\s*([\w.\-]+)\s*=\s*"([^"]+)"', line)
+    if mm:
+        versions[mm.group(1)] = mm.group(2)
+
+libs = {}
+for line in section('libraries').splitlines():
+    mm = re.match(r'\s*([\w.\-]+)\s*=\s*\{(.*)\}', line)
+    if not mm:
+        continue
+    alias, body = mm.group(1), mm.group(2)
+    module = re.search(r'module\s*=\s*"([^"]+)"', body)
+    group_ = re.search(r'group\s*=\s*"([^"]+)"', body)
+    name   = re.search(r'name\s*=\s*"([^"]+)"', body)
+    vref   = re.search(r'version\.ref\s*=\s*"([^"]+)"', body)
+    vlit   = re.search(r'(?<!\.)\bversion\s*=\s*"([^"]+)"', body)
+    if module:
+        g, a = module.group(1).split(':', 1)
+    elif group_ and name:
+        g, a = group_.group(1), name.group(1)
+    else:
+        continue
+    v = versions.get(vref.group(1)) if vref else (vlit.group(1) if vlit else None)
+    libs[alias] = (g, a, v)
+
+# androidx (annotation/collection/core/lifecycle) is deliberately NOT injected.
+# GeckoView 151's catalog pins them NEWER than this app's compileSdk 36 allows
+# (androidx.core 1.18.0 needs compileSdk 36.1; lifecycle 2.10.0 drags core up too).
+# Injecting them would override the app's compileSdk-36-safe core 1.17.0 pin (gradle
+# picks the highest version) and reintroduce the "requires compileSdk 36.1/37"
+# AAR-metadata error. The app supplies those androidx libs itself (transitively + its
+# own core pin). Only GeckoView-specific, version-SAFE deps go in the POM: media3
+# (the app aligns it up to its own 1.10.1) and snakeyaml (the app's newer wins).
+# Re-verify against geckoview/build.gradle on a Firefox bump.
+WANT = [
+    'androidx-media3-common', 'androidx-media3-datasource', 'androidx-media3-decoder',
+    'androidx-media3-exoplayer', 'androidx-media3-exoplayer-hls',
+]
+deps = []
+for alias in WANT:
+    if alias not in libs or not libs[alias][2]:
+        sys.stderr.write(
+            "ERROR(POM-deps): catalog alias '%s' missing/unresolved in %s — the version "
+            "catalog changed; re-verify the WANT list against geckoview/build.gradle.\n"
+            % (alias, toml_path))
+        sys.exit(1)
+    deps.append(libs[alias])
+
+# snakeyaml is a literal coordinate in geckoview/build.gradle, not the catalog.
+sy = re.search(r'org\.yaml:snakeyaml:([\w.\-]+)', open(gv_build, encoding='utf-8').read())
+if not sy:
+    sys.stderr.write("ERROR(POM-deps): org.yaml:snakeyaml:<ver> not found in %s\n" % gv_build)
+    sys.exit(1)
+deps.append(('org.yaml', 'snakeyaml', sy.group(1)))
+
+xml = "  <dependencies>\n"
+for g, a, v in deps:
+    xml += ("    <dependency>\n"
+            "      <groupId>%s</groupId>\n      <artifactId>%s</artifactId>\n"
+            "      <version>%s</version>\n      <scope>runtime</scope>\n"
+            "    </dependency>\n" % (g, a, v))
+xml += "  </dependencies>\n"
+
+poms = glob.glob(os.path.join(m2gv, '*', ver, '*.pom'))
+if not poms:
+    sys.stderr.write("ERROR(POM-deps): no POM under %s/*/%s/\n" % (m2gv, ver))
+    sys.exit(1)
+for pom in poms:
+    s = open(pom, encoding='utf-8').read()
+    if '<dependencies>' in s:   # idempotent
+        continue
+    if '</project>' not in s:
+        sys.stderr.write("ERROR(POM-deps): no </project> in %s\n" % pom)
+        sys.exit(1)
+    s = s.replace('</project>', xml + '</project>', 1)
+    open(pom, 'w', encoding='utf-8').write(s)
+    print("   injected %d <dependency> entries into %s" % (len(deps), os.path.basename(pom)))
+PY
+
 echo
 echo "[ok] build complete. Multi-ABI ($ABI_LIST) published under"
 echo "     ~/.m2/repository/org/mozilla/geckoview/"

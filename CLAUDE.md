@@ -378,6 +378,25 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
      from the POM gradle wrote (don't hardcode `geckoview-default` — it changes
      with channel/lite). Verify
      with `unzip -l <aar> | grep classes.jar` after the build.
+  4. **Inject GeckoView's transitive runtime deps into the POM** (`<dependencies>`)
+     — the publish wrote an EMPTY `<dependencies>`, so unlike Mozilla's POM ours
+     gives consumers nothing; every dep the app lacks otherwise has to be hand-pinned
+     and a Firefox bump silently adds new ones (we hit androidx.core, snakeyaml,
+     media3-exoplayer-hls one crash at a time). `04-build.sh` injects a curated set,
+     reading versions from gecko's `gradle/libs.versions.toml` (self-updating),
+     idempotent + fail-loud. **Curated, NOT the full official list:** only
+     GeckoView-specific, version-SAFE deps go in — the **media3 set + snakeyaml**.
+     EXCLUDED on purpose: `play-services-fido` (0007 removed it — would re-add the
+     Google FIDO binary), `exoplayer2` (not in lite), and **all androidx**
+     (annotation/collection/core/lifecycle). The androidx exclusion is the subtle
+     one: GeckoView 151's catalog pins androidx NEWER than the app's compileSdk 36
+     (`androidx.core 1.18.0` needs compileSdk 36.1; `lifecycle 2.10.0` drags core up),
+     and since gradle resolves a version conflict to the HIGHEST, injecting them would
+     override the app's deliberate compileSdk-36-safe `core 1.17.0` pin and
+     reintroduce the "requires compileSdk 36.1/37" AAR-metadata error. So androidx
+     stays app-controlled; the app keeps its `androidx.core` + `media3-exoplayer`
+     pins, and may drop its `snakeyaml` + `media3-exoplayer-hls` pins (the POM now
+     supplies those). Re-verify the `WANT` list vs `geckoview/build.gradle` on a bump.
 
   **This phase does NOT use
   the mozconfig template** — `--disable-compile-environment` makes configure reject
