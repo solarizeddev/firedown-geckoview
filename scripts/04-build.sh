@@ -318,18 +318,21 @@ fi
 # snakeyaml, media3-exoplayer-hls one crash at a time). Write the real list here so
 # the artifact is self-contained, exactly like Mozilla's.
 #
-# What goes in: GeckoView-specific, version-SAFE deps only — the media3 set +
-# snakeyaml. DELIBERATELY EXCLUDED: `play-services-fido` (patch 0007 removed it —
-# injecting it re-adds the Google FIDO binary), the `exoplayer2` project dep (not in
-# the lite build), AND all androidx (annotation/collection/core/lifecycle) — see the
-# python `WANT` note: GeckoView 151's catalog pins androidx NEWER than the app's
-# compileSdk 36 (core 1.18.0 → needs 36.1), so injecting it would override the app's
-# compileSdk-36-safe core 1.17.0 pin and break the build. Versions resolve from
-# gradle/libs.versions.toml at publish time (self-updating); fail loud if an alias
-# stops resolving (catalog changed → re-verify WANT vs build.gradle on a FF bump).
-# After this the app may drop its snakeyaml + media3-exoplayer-hls pins; it KEEPS its
-# androidx.core + media3-exoplayer pins (the app needs those exact versions for
-# compileSdk 36 / its own player, independent of GeckoView).
+# What goes in: GeckoView's runtime deps — the androidx set (annotation/collection/
+# core/lifecycle) + the media3 set + snakeyaml. DELIBERATELY EXCLUDED:
+# `play-services-fido` (patch 0007 removed it — injecting it re-adds the Google FIDO
+# binary) and the `exoplayer2` project dep (not in the lite build). The androidx set
+# was previously excluded because GeckoView 151's catalog pins it NEWER than the app's
+# old compileSdk 36 allowed (core 1.18.0 → needs 36.1) and gradle's highest-wins would
+# drag the app onto an AAR-metadata error. The app is now **compileSdk 37**, which
+# satisfies core 1.18.0 (and lifecycle 2.10.0), so it's safe to inject the full set and
+# let the app drop its hand-pins. CAUTION: if the app ever drops back to compileSdk 36,
+# re-exclude androidx here (highest-wins would reintroduce the "requires 36.1/37"
+# error). Versions resolve from gradle/libs.versions.toml at publish time
+# (self-updating); fail loud if an alias stops resolving (catalog changed → re-verify
+# WANT vs build.gradle on a FF bump). After this the app may drop its androidx.core +
+# snakeyaml + media3-exoplayer-hls pins (the POM supplies them); it KEEPS its
+# media3-exoplayer / media3-ui pins (its own player aligns those up to 1.10.1).
 python3 - "$GECKO_SRC" "$M2_GV" "$GECKOVIEW_VERSION" <<'PY'
 import sys, os, re, glob
 gecko, m2gv, ver = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -367,16 +370,17 @@ for line in section('libraries').splitlines():
     v = versions.get(vref.group(1)) if vref else (vlit.group(1) if vlit else None)
     libs[alias] = (g, a, v)
 
-# androidx (annotation/collection/core/lifecycle) is deliberately NOT injected.
-# GeckoView 151's catalog pins them NEWER than this app's compileSdk 36 allows
-# (androidx.core 1.18.0 needs compileSdk 36.1; lifecycle 2.10.0 drags core up too).
-# Injecting them would override the app's compileSdk-36-safe core 1.17.0 pin (gradle
-# picks the highest version) and reintroduce the "requires compileSdk 36.1/37"
-# AAR-metadata error. The app supplies those androidx libs itself (transitively + its
-# own core pin). Only GeckoView-specific, version-SAFE deps go in the POM: media3
-# (the app aligns it up to its own 1.10.1) and snakeyaml (the app's newer wins).
+# The androidx set (annotation/collection/core/lifecycle) IS injected now that the app
+# is compileSdk 37. GeckoView 151's catalog pins androidx.core 1.18.0 (needs compileSdk
+# 36.1) and lifecycle 2.10.0 (drags core up too); gradle resolves the highest version,
+# so these win over any older app pin. That's fine at compileSdk 37 (it satisfies the
+# AAR metadata) — it was NOT at compileSdk 36, which is why this list previously
+# excluded androidx. If the app ever reverts to compileSdk 36, drop the androidx
+# aliases here again or the build hits the "requires compileSdk 36.1/37" error.
 # Re-verify against geckoview/build.gradle on a Firefox bump.
 WANT = [
+    'androidx-annotation', 'androidx-annotation-experimental', 'androidx-collection',
+    'androidx-core', 'androidx-lifecycle-common', 'androidx-lifecycle-process',
     'androidx-media3-common', 'androidx-media3-datasource', 'androidx-media3-decoder',
     'androidx-media3-exoplayer', 'androidx-media3-exoplayer-hls',
 ]

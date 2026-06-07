@@ -384,19 +384,22 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
      and a Firefox bump silently adds new ones (we hit androidx.core, snakeyaml,
      media3-exoplayer-hls one crash at a time). `04-build.sh` injects a curated set,
      reading versions from gecko's `gradle/libs.versions.toml` (self-updating),
-     idempotent + fail-loud. **Curated, NOT the full official list:** only
-     GeckoView-specific, version-SAFE deps go in — the **media3 set + snakeyaml**.
-     EXCLUDED on purpose: `play-services-fido` (0007 removed it — would re-add the
-     Google FIDO binary), `exoplayer2` (not in lite), and **all androidx**
-     (annotation/collection/core/lifecycle). The androidx exclusion is the subtle
-     one: GeckoView 151's catalog pins androidx NEWER than the app's compileSdk 36
+     idempotent + fail-loud. **Curated, NOT the full official list:** the **androidx
+     set (annotation/collection/core/lifecycle) + media3 set + snakeyaml**. EXCLUDED on
+     purpose: `play-services-fido` (0007 removed it — would re-add the Google FIDO
+     binary) and `exoplayer2` (not in lite). **The androidx set is a compileSdk-gated
+     decision:** GeckoView 151's catalog pins androidx NEWER than older Android SDKs
      (`androidx.core 1.18.0` needs compileSdk 36.1; `lifecycle 2.10.0` drags core up),
-     and since gradle resolves a version conflict to the HIGHEST, injecting them would
-     override the app's deliberate compileSdk-36-safe `core 1.17.0` pin and
-     reintroduce the "requires compileSdk 36.1/37" AAR-metadata error. So androidx
-     stays app-controlled; the app keeps its `androidx.core` + `media3-exoplayer`
-     pins, and may drop its `snakeyaml` + `media3-exoplayer-hls` pins (the POM now
-     supplies those). Re-verify the `WANT` list vs `geckoview/build.gradle` on a bump.
+     and gradle resolves a version conflict to the HIGHEST, so these win over any older
+     app pin. That was UNSAFE while the app was compileSdk 36 (it would reintroduce the
+     "requires compileSdk 36.1/37" AAR-metadata error) — so androidx was excluded then.
+     The app is now **compileSdk 37**, which satisfies core 1.18.0 / lifecycle 2.10.0,
+     so the full set is injected and the app can drop its hand-pins. **CAUTION: if the
+     app ever reverts to compileSdk 36, re-exclude androidx here** (highest-wins would
+     bring back the metadata error). After this the app may drop its `androidx.core` +
+     `snakeyaml` + `media3-exoplayer-hls` pins (the POM supplies them); it KEEPS its
+     `media3-exoplayer` / `media3-ui` pins (its own player aligns those to 1.10.1).
+     Re-verify the `WANT` list vs `geckoview/build.gradle` on a bump.
 
   **This phase does NOT use
   the mozconfig template** — `--disable-compile-environment` makes configure reject
