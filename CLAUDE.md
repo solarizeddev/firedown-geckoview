@@ -451,6 +451,19 @@ Pinning only changes the version **label** — to ship newer engine code you mus
 also bump `FIREFOX_VERSION`/`FIREFOX_TAG`. ABIs (`ANDROID_TARGETS`) are
 arm64-v8a + x86_64 (`aarch64-linux-android x86_64-linux-android`).
 
+**Bumping the pin against EXISTING objdirs (learned the hard way):** exporting
+`MOZ_BUILD_DATE` is NOT enough on an incremental rebuild — outside Mozilla
+automation `<objdir>/buildid.h` is not regenerated (the generated-file stub
+isn't FORCEd and the env var isn't a tracked input), and gradle reads
+`buildid.h` for the version. Symptom: `GeckoView version = 151.0.<old>` in the
+gradle log, the publish lands under the old coordinate, and the POM-install
+step fails loudly on the missing new-version dir. `04-build.sh`'s
+`refresh_buildid` handles it: before each mach build (per-ABI AND fat) it
+deletes the objdir's `buildid.h`(+stub) whenever it doesn't carry the pin, so
+the build restamps it — per-ABI too, since the Java `BuildConfig` buildid (fat
+gradle) and each ABI's libxul-embedded buildid must agree. No-op when already
+pinned; a pin change costs one libxul relink per ABI.
+
 ### UTC timezone spoofing is an app toggle, not a build patch
 
 IronFox spoofs the timezone to UTC with a code patch (a custom bool pref read in

@@ -29,6 +29,31 @@ if [ -n "${GECKOVIEW_BUILD_DATE:-}" ]; then
   echo "== pinning MOZ_BUILD_DATE=$MOZ_BUILD_DATE -> GeckoView ${FIREFOX_VERSION}.$MOZ_BUILD_DATE =="
 fi
 
+# The pin only takes effect when <objdir>/buildid.h is (re)generated — and outside
+# Mozilla automation an incremental `mach build` does NOT regenerate it (the
+# generated-file stub isn't FORCEd and the MOZ_BUILD_DATE env var isn't tracked as
+# an input). So bumping GECKOVIEW_BUILD_DATE against EXISTING objdirs silently
+# keeps the OLD buildid: gradle reads buildid.h for the version, so it assembles
+# and publishes under the old coordinate despite the export above (hit on the
+# 20260601110758 -> 20260608154138 bump: "GeckoView version = 151.0.<old>" and the
+# POM-install step failed loudly on the missing new-version dir). Delete the stale
+# buildid.h (+ its .stub/.pp) from an objdir before its mach build so the build
+# regenerates it with the pin. Applies to the per-ABI objdirs AND the fat one —
+# the Java BuildConfig buildid (fat gradle) and the buildid embedded in each ABI's
+# libxul must agree. No-op when the objdir already carries the pin, so re-runs
+# don't churn needless libxul relinks; a pin change costs one relink per ABI.
+refresh_buildid() {
+  local obj="$1" stale=0 f
+  [ -n "${MOZ_BUILD_DATE:-}" ] && [ -d "$obj" ] || return 0
+  while IFS= read -r f; do
+    grep -q "$MOZ_BUILD_DATE" "$f" || stale=1
+  done < <(find "$obj" -name buildid.h -not -path '*/.deps/*' 2>/dev/null)
+  if [ "$stale" -eq 1 ]; then
+    echo "   stale buildid in $obj -> deleting buildid.h so it regenerates as $MOZ_BUILD_DATE"
+    find "$obj" \( -name buildid.h -o -name 'buildid.h.*' \) -delete 2>/dev/null || true
+  fi
+}
+
 # Compilation parallelism. mach auto-detects (all logical cores) when no -j is
 # given; pinning BUILD_JOBS bounds it. Gecko's Rust/LTO link + codegen steps are
 # RAM-hungry, so on a high-core box a full -j$(nproc) can OOM — capping jobs is
@@ -182,6 +207,7 @@ for T in $ANDROID_TARGETS; do
     emit_android_paths
   } >> "$MOZCONFIG"
 
+  refresh_buildid "$GECKO_SRC/$OBJ"
   ./mach build "${MACH_JOBS[@]}"
   # GeckoView dropped the withGeckoBinaries/withoutGeckoBinaries product flavors:
   # gecko binaries are now configured onto the plain `release` variant
@@ -262,6 +288,7 @@ echo "== fat-AAR mozconfig =="
 cat "$MOZCONFIG"
 echo
 
+refresh_buildid "$GECKO_SRC/objdir-gv-fat"
 ./mach build "${MACH_JOBS[@]}"
 # Assemble the fat RELEASE AAR. This is the pass where
 # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
