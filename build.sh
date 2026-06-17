@@ -10,6 +10,10 @@
 #   ./build.sh publish-abi <triple>   # publish ONE already-built per-ABI AAR to
 #                        #     mavenLocal (skip the fat-AAR) — quick single-ABI
 #                        #     device/emulator test, e.g. publish-abi aarch64-linux-android
+#   ./build.sh bump <ver>   #     bump the GeckoView version in one command, e.g.
+#                        #     ./build.sh bump 152.0.20260612001812 — rewrites
+#                        #     config/build.env and drops the stale source trees +
+#                        #     mavenLocal entry, then just run `docker`/`all`.
 #   ./build.sh all       # fetch → bootstrap → patch → build → sync
 #   ./build.sh docker    #     run `all` (or passed stages) inside the build
 #                        #     container — use this on a too-new-glibc host (Arch),
@@ -22,6 +26,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 S="$ROOT/scripts"
 
 case "${1:-all}" in
+  bump)      shift; bash "$S/bump-version.sh" "$@" ;;
   prereqs)   bash "$S/00-prereqs-arch.sh" ;;
   fetch)     bash "$S/01-fetch-source.sh" ;;
   bootstrap) bash "$S/02-bootstrap.sh" ;;
@@ -38,7 +43,7 @@ case "${1:-all}" in
     bash "$S/05-sync-to-app.sh"
     ;;
   *)
-    echo "usage: ./build.sh {prereqs|fetch|bootstrap|patch|build|sync|all|docker}" >&2
+    echo "usage: ./build.sh {bump|prereqs|fetch|bootstrap|patch|build|sync|all|docker}" >&2
     exit 2
     ;;
 esac

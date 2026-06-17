@@ -430,8 +430,30 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
 
 ## After changing a patch / bumping the version
 
-- Bump `FIREFOX_VERSION`/`FIREFOX_TAG` in `config/build.env`; `rm -rf gecko/`;
-  re-`fetch`.
+- **Bumping the version is one command: `./build.sh bump <coordinate>`** (e.g.
+  `./build.sh bump 152.0.20260612001812`, or `./build.sh bump 153.0 <buildid>`,
+  or `./build.sh bump 153.0` to keep the current buildid pin). It rewrites
+  `config/build.env`'s `FIREFOX_VERSION` + `FIREFOX_TAG` (derived as
+  `FIREFOX_<milestone>_RELEASE`) + `GECKOVIEW_BUILD_DATE`, AND invalidates the two
+  pieces of stale state a bump silently makes wrong (see the 151→152 saga): every
+  source checkout whose milestone differs from the new one — **both** the host
+  top-level `gecko/` AND the Docker flow's `.docker-build/gecko` (separate trees,
+  the trap) — so fetch re-clones, plus the published `~/.m2` geckoview entry so
+  `sync` can't read back the old coordinate. Toolchain caches
+  (`.docker-build/mozbuild`, `cargo-*`) are left intact. After it, just
+  `./build.sh docker` (or `all`) + `./build.sh sync`.
+- **The Docker build compiles a DIFFERENT tree than the host.**
+  `docker/build-in-docker.sh` mounts `.docker-build/gecko` over
+  `/work/src/gecko`, so `./build.sh docker …` fetches/patches/builds
+  `.docker-build/gecko`, NOT the host top-level `gecko/` that a bare
+  `./build.sh patch` touches. Don't patch one and build the other. `bump` clears
+  both; if you bump by hand, run the fetch/patch stages **inside** Docker
+  (`./build.sh docker fetch patch build`) so they hit the tree Docker compiles.
+- To bump by hand instead: set `FIREFOX_VERSION`/`FIREFOX_TAG` in
+  `config/build.env`, then `rm -rf` the stale checkout(s); `01-fetch-source.sh`
+  now **fails loudly** if a non-empty `$GECKO_SRC` doesn't match `FIREFOX_VERSION`
+  (a shallow tag clone can't be retargeted in place), so it won't silently build
+  the old version.
 - Re-run `./build.sh patch` and confirm each applier reports `[ok]` (not an
   anchor error). Re-running is idempotent (`[skip]` once markers are present).
 - Rebuild and re-`sync`. Revert the app's experimental microG
