@@ -19,7 +19,33 @@ retry() {  # retry <attempts> <cmd...>
 }
 
 if [ -d "$GECKO_SRC" ] && [ -n "$(ls -A "$GECKO_SRC" 2>/dev/null || true)" ]; then
-  echo "[skip] source already present at $GECKO_SRC (rm -rf to refetch)"
+  # Guard against a STALE checkout. This skip otherwise silently reuses whatever
+  # version is already on disk — the 151->152 trap: the Docker flow's own
+  # .docker-build/gecko was a 151 shallow clone, so `./build.sh docker fetch` kept
+  # reusing it and the container compiled 151 + published 151.0.<buildid> despite
+  # FIREFOX_VERSION=152.0 (the host top-level gecko/, patched to 152, is a
+  # DIFFERENT tree the Docker build never compiles). A shallow `git clone --branch
+  # <tag>` can't be retargeted in place, so the only correct action is to rm -rf
+  # and re-clone — detect the mismatch and fail loudly instead of building the
+  # wrong version. (version.txt / milestone.txt is just the milestone string.)
+  VF="" HAVE=""
+  for C in "$GECKO_SRC/browser/config/version.txt" "$GECKO_SRC/config/milestone.txt"; do
+    [ -f "$C" ] && { VF="$C"; break; }
+  done
+  if [ -n "$VF" ]; then
+    HAVE="$(grep -v '^[[:space:]]*#' "$VF" | grep -v '^[[:space:]]*$' | tail -1 | tr -d '[:space:]')"
+    case "$HAVE" in
+      "$FIREFOX_VERSION"|"$FIREFOX_VERSION".*) : ;;
+      *)
+        echo "ERROR(01): existing source at $GECKO_SRC is version '$HAVE', but" >&2
+        echo "           FIREFOX_VERSION='$FIREFOX_VERSION'. A shallow tag clone cannot be" >&2
+        echo "           retargeted in place; remove it and re-fetch:" >&2
+        echo "               rm -rf '$GECKO_SRC'" >&2
+        exit 1
+        ;;
+    esac
+  fi
+  echo "[skip] source already present at $GECKO_SRC ($HAVE, rm -rf to refetch)"
   exit 0
 fi
 
