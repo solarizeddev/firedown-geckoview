@@ -464,6 +464,29 @@ the build restamps it — per-ABI too, since the Java `BuildConfig` buildid (fat
 gradle) and each ABI's libxul-embedded buildid must agree. No-op when already
 pinned; a pin change costs one libxul relink per ABI.
 
+**Bumping the MILESTONE against EXISTING objdirs (the 151→152 trap):** the
+coordinate is `<milestone>.<buildid>` and the milestone has the *same* staleness
+trap as the buildid, one level up. The milestone (`MOZ_APP_VERSION` /
+`MOZILLA_VERSION`) is derived by **configure** from the source version files that
+`FIREFOX_VERSION` selects, baked into `<objdir>/config.status` **once**, and the
+gradle plugin reads it back from there — it is NOT re-derived from source per
+build. So bumping `FIREFOX_VERSION`/`FIREFOX_TAG` and re-fetching the new tag
+**in place** (which rewrites the source files but leaves the untracked objdirs)
+keeps the OLD milestone: gradle assembles/publishes `<old-milestone>.<newbuildid>`
+and the POM-install step fails loudly on the missing `<new-milestone>.*` dir.
+Symptom seen on 151→152: `GeckoView version = 151.0.<newbuildid>` even though the
+source was 152 (the `0006` patch anchor had already moved to its 152 `nsCOMPtr`
+shape — proof the tree was 152). Unlike the buildid (an env var, untracked), the
+version IS a tracked configure input, so the cure is to force a **reconfigure**:
+`04-build.sh`'s `refresh_configure` deletes a stale objdir's `config.status`
+before each mach build (per-ABI AND fat) whenever its recorded version doesn't
+match `FIREFOX_VERSION`, so mach reconfigures and cascades the new version into the
+generated files + one libxul relink. No-op when already current. (If a major bump
+also crosses a `CLOBBER` boundary, the reconfigure-triggered build demands a full
+clobber loudly — also correct. Manual recovery for an already-stale objdir:
+`rm -f gecko/objdir-gv-*/config.status` and clear the stale
+`~/.m2/repository/org/mozilla/geckoview` entry before rebuilding.)
+
 ### UTC timezone spoofing is an app toggle, not a build patch
 
 IronFox spoofs the timezone to UTC with a code patch (a custom bool pref read in

@@ -54,6 +54,38 @@ refresh_buildid() {
   fi
 }
 
+# The MILESTONE analogue of refresh_buildid. The published coordinate is
+# <milestone>.<buildid>: the buildid is handled above, but the milestone
+# (MOZ_APP_VERSION / MOZILLA_VERSION, derived by configure from the SOURCE version
+# files that FIREFOX_VERSION selects) is read into <objdir>/config.status ONCE, at
+# configure time, and the gradle plugin reads it back from there — it is NOT
+# re-derived from source per build. So bumping FIREFOX_VERSION against an EXISTING
+# objdir (e.g. an in-place re-fetch to the new tag, which rewrites the source files
+# but leaves the untracked objdir's config.status alone) silently keeps the OLD
+# milestone: gradle assembles/publishes under <old-milestone>.<newbuildid> and the
+# POM-install step fails loudly on the missing <new-milestone>.* dir. Hit on the
+# 151->152 bump: "GeckoView version = 151.0.<newbuildid>" despite a 152 source tree
+# (the 0006 patch anchor had already moved to its 152 shape, proving the source was
+# 152). Unlike the buildid (an env var, untracked), the version IS a tracked
+# configure INPUT, so the cure is to force configure to re-run: delete config.status
+# and mach reconfigures on the next build, cascading the new MOZ_APP_VERSION into
+# the generated files (application.ini, the gradle version) and relinking libxul
+# once. No-op when the objdir's configured version already matches FIREFOX_VERSION,
+# so re-runs don't churn. (If a major bump also crossed a CLOBBER boundary the
+# reconfigure-triggered mach build demands a clobber loudly — also correct.)
+refresh_configure() {
+  local obj="$1" mk="$1/config/autoconf.mk" cur
+  [ -n "${FIREFOX_VERSION:-}" ] && [ -d "$obj" ] && [ -f "$mk" ] || return 0
+  cur="$(sed -n 's/^\(MOZILLA_VERSION\|MOZ_APP_VERSION\)[[:space:]]*=[[:space:]]*//p' "$mk" | head -1)"
+  [ -n "$cur" ] || return 0
+  case "$cur" in
+    "$FIREFOX_VERSION"|"$FIREFOX_VERSION".*) return 0 ;;
+  esac
+  echo "   stale milestone in $obj (configured version=$cur, want $FIREFOX_VERSION)"
+  echo "   -> deleting config.status so the next mach build reconfigures against the source"
+  rm -f "$obj/config.status" 2>/dev/null || true
+}
+
 # Compilation parallelism. mach auto-detects (all logical cores) when no -j is
 # given; pinning BUILD_JOBS bounds it. Gecko's Rust/LTO link + codegen steps are
 # RAM-hungry, so on a high-core box a full -j$(nproc) can OOM — capping jobs is
@@ -208,6 +240,7 @@ for T in $ANDROID_TARGETS; do
   } >> "$MOZCONFIG"
 
   refresh_buildid "$GECKO_SRC/$OBJ"
+  refresh_configure "$GECKO_SRC/$OBJ"
   ./mach build "${MACH_JOBS[@]}"
   # GeckoView dropped the withGeckoBinaries/withoutGeckoBinaries product flavors:
   # gecko binaries are now configured onto the plain `release` variant
@@ -289,6 +322,7 @@ cat "$MOZCONFIG"
 echo
 
 refresh_buildid "$GECKO_SRC/objdir-gv-fat"
+refresh_configure "$GECKO_SRC/objdir-gv-fat"
 ./mach build "${MACH_JOBS[@]}"
 # Assemble the fat RELEASE AAR. This is the pass where
 # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
