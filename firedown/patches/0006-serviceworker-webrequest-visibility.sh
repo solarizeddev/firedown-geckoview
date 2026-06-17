@@ -41,10 +41,17 @@ src = open(path, encoding="utf-8").read()
 
 # Tail of InterceptedHttpChannel::OnStartRequest — fire the notification right
 # before the listener is told the (synthesized) response started.
+# FF152: the listener call was refactored to go through a local
+# `nsCOMPtr<nsIStreamListener> listener(mListener);` (was a direct
+# `mListener->OnStartRequest(this)` through FF151), with a trailing
+# `return NS_OK;`. The hook still lands before StoreOnStartRequestCalled, so
+# placement/semantics are unchanged — only the anchor text moved. Re-verify on
+# the next bump; this block is prone to exactly this kind of drift.
 anchor = (
     "  StoreOnStartRequestCalled(true);\n"
     "  if (mListener) {\n"
-    "    return mListener->OnStartRequest(this);\n"
+    "    nsCOMPtr<nsIStreamListener> listener(mListener);\n"
+    "    return listener->OnStartRequest(this);\n"
     "  }\n"
 )
 
