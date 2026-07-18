@@ -14,6 +14,7 @@ It applies a small, deliberate set of modifications:
 | **telemetry off** | Strip crash reporter + reporting code at build, neutralize telemetry/Normandy/health-report via default prefs. | mozconfig + `0002` prefs |
 | **Pocket/sponsored off** | Engine-level Pocket + activity-stream sponsored prefs off (most of this is Fenix-UI, absent from Firedown — included defensively). | `0002` prefs |
 | **hardened privacy** | IronFox-style defaults: query stripping, GPC/DNT, network-state partitioning, referrer trimming, no beacons/prefetch/predictor. | `0002` prefs |
+| **window-activation wedge** | Fix Android `nsWindow` so a destroyed (hidden) session window hands activation back to the visible tab — otherwise its document stays blurred and text selection paints the disabled grey forever. Tracks the activation holder, re-activates on `Destroy()`, identity-checks the `BringToFront()` guard, self-heals on touch. | `firedown/patches/0008-*` (C++ edit) |
 
 Why these are *defaults* (prefs): Firedown's `GeckoPreferenceController` can still
 override any of them at runtime, so the build stays flexible. Why the FIDO one is
