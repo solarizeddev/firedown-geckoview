@@ -58,6 +58,7 @@ patch is gated on a marker or canonical content):
 | C++ edit | `firedown/patches/0005-prevent-fp-via-chrome-resources.sh` | In `nsScriptSecurityManager::CheckLoadURIFlags`, deny an http/https page loading the build's `chrome://` UI resources (fingerprint probe). IronFox-derived (`gecko-prevent-fingerprinting-via-chrome-resources`) but **self-contained** — a `SchemeIs` source check (no `nsINetUtil`/extra `#include`) + generic resource-prefix allowlist (no IronFox branding paths). Marker `FIREDOWN-CHROME-FP`. **Fails loudly** if the anchor moved. |
 | C++ edit | `firedown/patches/0006-serviceworker-webrequest-visibility.sh` | Fire `http-on-examine-response` from `InterceptedHttpChannel::OnStartRequest` so **ServiceWorker-synthesized responses become visible to `webRequest`** (`onHeadersReceived` + `filterResponseData`) — a capture-reach patch (NOT IronFox; ours). Marker `FIREDOWN-SW-WEBREQUEST`. **Fails loudly** if the anchor moved. See "ServiceWorker capture" below. |
 | Java + build edit | `firedown/patches/0007-webauthn-drop-gms-fido.sh` | Remove the GMS FIDO (`play-services-fido`) **runtime** dependency entirely (complements `0001`). Makes `WebAuthnTokenManager`'s `SUPPORTED_ALGORITHMS` lazy (the `<clinit>` GMS load that crashed) and `if (true)`-guards the three live GMS entry points (`isUVPAA`, `makeCredential`/`getAssertion` GMS fallbacks) so no GMS code runs; flips `geckoview/build.gradle` `play-services-fido` to `compileOnly` (compiles, not bundled). The app then drops the dep → **zero Google FIDO binary in the APK**, WebAuthn is Credential-Manager-only. Marker `FIREDOWN-WEBAUTHN-NOGMS`. **Fails loudly** if any anchor moved. See WebAuthn section. |
+| gradle edit | `firedown/patches/0009-restore-release-publication.sh` | Restore the geckoview **`release` Maven publication** FF153 dropped (upstream now publishes debug-only, so `publishReleasePublicationToMavenLocal` — which phase-2 drives — vanished). Appends a **POM-only** release publication (sources + javadoc jars, **no** `from components.release`) that reproduces the 151/152 contract phase-2 depends on: POM + sources + javadoc, no main `.aar` (packaging stamped `pom`), no `.module`. Marker `FIREDOWN-RELEASE-PUBLICATION`. **Fails loudly** if the debug-publication anchor moved. See phase-2 mechanics below. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--enable-geckoview-lite` (artifactId `geckoview` not `geckoview-omni`, and drops the Glean dep), `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
 Division of labor: **prefs are defaults** (Firedown's `GeckoPreferenceController`
@@ -349,9 +350,18 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   fast) with `MOZ_ANDROID_FAT_AAR_ARCHITECTURES` + `MOZ_ANDROID_FAT_AAR_<ABI>`
   combines the per-ABI AARs and publishes via `./mach gradle
   geckoview:publishReleasePublicationToMavenLocal` (publication is named after the
-  variant, `release`). A mavenLocal publish carries the **POM with transitive
-  deps** (a bare `.aar` in `app/libs` would miss them). **The `.aar` install is a
-  THREE-STEP dance — the publish task alone does NOT produce a usable artifact:**
+  variant, `release`). **FF153 note:** upstream reworked geckoview publishing to
+  **debug-only** (`android.publishing { singleVariant('debug') }` + a lone
+  `create('debug', …)`), which **deletes** the `release` publication and its
+  `publishReleasePublicationToMavenLocal` task — symptom on 152→153: the compile +
+  `GeckoView version = 153.0.<buildid>` succeed, then this publish step alone dies
+  with "task 'publishReleasePublicationToMavenLocal' not found in project
+  ':geckoview'." **Patch `0009` restores** a POM-only `release` publication so the
+  task exists again and behaves exactly as below (POM + sources + javadoc, no main
+  `.aar`, no `.module`) — the whole three-step dance is unchanged by it. A
+  mavenLocal publish carries the **POM with transitive deps** (a bare `.aar` in
+  `app/libs` would miss them). **The `.aar` install is a THREE-STEP dance — the
+  publish task alone does NOT produce a usable artifact:**
   1. `./mach gradle geckoview:assembleRelease` — builds the fat release AAR
      (`objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar`); this is
      the pass where `MOZ_ANDROID_FAT_AAR_ARCHITECTURES` merges every ABI's native
