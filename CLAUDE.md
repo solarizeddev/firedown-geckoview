@@ -275,8 +275,11 @@ a distinct configure/compile failure):
 | host tools (llvm-objdump, cbindgen) | `00-prereqs-arch.sh` packages (`llvm`, `rust-cbindgen`) | "Cannot find llvm-objdump", missing cbindgen |
 
 Still **manual** (version-pinned by Firefox, so we don't fetch blindly): the SDK
-**platform** — `sdkmanager "platforms;android-36.1"` — and the **NDK must be the
-exact version FF pins (r29 for 151)**; configure validates it.
+**platform** — `sdkmanager "platforms;android-37.0"` (FF153 pins compileSdk
+`37.0` + build-tools `37.0.0` in `build/moz.configure/android-sdk.configure`; it
+was `android-36.1` on FF151, so re-check this string on a milestone bump) — and
+the **NDK must be the exact version FF pins (still r29 on FF153, was r29 on
+151)**; configure validates it.
 
 ### The big lesson: bleeding-edge distro glibc vs vendored C
 
