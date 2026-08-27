@@ -217,6 +217,74 @@ hard way (passkeys "should work" after `0001` but didn't):
    (`WebAuthnCredentialManager` hard-gates on `UPSIDE_DOWN_CAKE` +
    `FEATURE_CREDENTIALS`). On a provider-less / pre-34 device there is no prompt
    and (post-`0007`) no GMS fallback — by design.
+5. **The credential PROVIDER must trust the browser's signing cert.** As of
+   Aug 2026 Google Password Manager enforces a server-controlled trusted-browser
+   allowlist on origin-asserting requests — see the next section. Items 1–4 are
+   necessary but no longer sufficient when the user's passkeys live in Google
+   Password Manager.
+
+### The GMS "trusted browsers" allowlist — a provider-side wall (diagnosed 2026-08-28)
+
+**Symptom:** every passkey ceremony fails INSTANTLY, no provider sheet ever
+appears — the site falls back to its cross-device/hybrid UI (Google shows
+"Something went wrong / Make sure Bluetooth is on"); webauthn.io reports
+"operation not supported" (that exact wording is `0007`'s guard — the CredMan
+path yielded nothing, so the short-circuited GMS fallback returned
+`NOT_SUPPORTED_ERR`). Registration (create) fails the same way as assertion.
+IronFox fails identically on the same device (its intact GMS fallback dies as
+an AbortError instead — different label, same wall).
+
+**Root cause (on-device logcat, debug build, 2026-08-28):**
+
+    Auth.Api.Credentials  com.google.android.gms  E
+    [FetchAllowlistedOriginOperation] rejecting asserted origin from app
+    'com.solarized.firedown', with fingerprint(s) 55:49:…:25, because it is
+    not in the list of trusted browsers.
+
+Google Play services — acting as the Google Password Manager credential
+provider — validates every ORIGIN-ASSERTING CredentialManager request
+(`setOrigin`, which a browser must use to act for a website) against Google's
+privileged-apps list (`gstatic.com/gpm-passkeys-privileged-apps/apps.json`,
+keyed package name + SHA-256 signing cert). An unlisted browser gets no loud
+error: the provider simply reports NO matching credentials, `prepareGetCredential`
+hands back a null handle, and GeckoView falls through to the (dead) GMS path.
+
+**It is NOT a Firefox/GeckoView/app regression — don't re-diff the engine.**
+Ruled out exhaustively in the 2026-08 investigation: every file in
+`dom/webauthn` plus the GeckoView Java layer (`WebAuthnTokenManager`,
+`WebAuthnCredentialManager`, `WebAuthnUtils`, `GeckoResult`, `ThreadUtils`) is
+behaviorally IDENTICAL for the modal CredMan path from FF151 through FF154.0.1
+and Nightly. (The one real change in that window — FF153's `dom/webauthn`
+rewrite — only restructured conditional mediation, which is hardcoded
+unavailable on Android, and threading.) The manifest permissions and both
+WebAuthn patches were verified intact. The breakage arrived with NO app or
+engine change because the enforcement lives in GMS, which SELF-UPDATES
+silently — "it worked last month and nothing changed on our side" is exactly
+this wall's signature. Precedents: Mozilla's own Nightly cert was once missing
+from the same list (bug 1870436); bug 2009251 is the same shape on official
+Firefox 148.
+
+**No client-side bypass exists, by design.** Without `setOrigin`, Credential
+Manager validates the rpId against the CALLING APP's own Digital Asset Links,
+so a browser cannot act for arbitrary websites that way. `0001`/`0007` remain
+correct and are unrelated — do not "fix" them in response to this symptom.
+
+**Remedies (all external to this repo):**
+- Register the browser in Google's privileged-apps list via the request form
+  linked from the Android "privileged apps" docs
+  (https://docs.google.com/forms/d/e/1FAIpQLScRuk9tTg0QPfSWl9SbpbIorX8xx2FCXlmoUYftCX2MxG4qyg/viewform),
+  submitting the package name + the SHA-256 signing-cert fingerprint of every
+  build that should work: the RELEASE cert (`./gradlew signingReport`, or
+  `keytool -printcert -jarfile app-release.apk`), and optionally each dev
+  machine's DEBUG keystore cert — a debug install is rejected on the debug
+  cert (that is the fingerprint in the log above). Propagation is on Google's
+  schedule; GMS caches the fetched list.
+- Third-party credential providers (Bitwarden, Proton Pass, …) keep their OWN
+  allowlists (some also consume Google's `apps.json`) — request/PR inclusion
+  there separately; that is how smaller Gecko/Chromium forks got in.
+- Until listed, passkeys stored in Google Password Manager cannot be exercised
+  from Firedown at all; a passkey held by a provider that trusts the browser
+  still works. Nothing in the build can change this.
 
 ### play-services-fido: gone entirely as of `0007` (was a load-only requirement)
 
