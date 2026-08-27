@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Run a command with the CI runner's preinstalled Android/WASI env UNSET.
+#
+#   scripts/ci-clean-env ./build.sh bootstrap
+#
+# GitHub-hosted runners export ANDROID_HOME / ANDROID_SDK_ROOT / ANDROID_NDK_HOME
+# pointing at their own preinstalled SDK+NDK. config/build.env honours those,
+# which flips the build onto the reuse-existing-SDK path (skipping `mach
+# bootstrap`) with an NDK version Firefox does not pin — configure then fails.
+#
+# Why a wrapper instead of `env: ANDROID_HOME: ""` in the workflow: GitHub's env
+# block can set a variable to empty but cannot unset it, and empty is NOT the
+# same as absent here. Our shell scripts read `${ANDROID_HOME:-}`, so empty is
+# treated as absent — but mach does not: mozboot/android.py resolves the NDK via
+# os.environ.get("ANDROID_NDK_HOME", <bootstrap default>), where an empty string
+# is present and therefore beats the default. The NDK path becomes "" and
+# bootstrap dies on `FileNotFoundError: 'source.properties'` (run 33070704928).
+set -euo pipefail
+
+exec env \
+  -u ANDROID_HOME \
+  -u ANDROID_SDK_ROOT \
+  -u ANDROID_NDK \
+  -u ANDROID_NDK_HOME \
+  -u ANDROID_NDK_ROOT \
+  -u WASI_SYSROOT \
+  "$@"

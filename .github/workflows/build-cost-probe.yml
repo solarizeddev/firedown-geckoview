@@ -20,8 +20,15 @@
 # ANDROID_NDK_HOME to their own preinstalled SDK+NDK. config/build.env honours
 # those, which would silently flip the build onto the reuse-existing-SDK path
 # (skipping `mach bootstrap`) with an NDK version Firefox does not pin — a
-# guaranteed configure failure. They are explicitly blanked below so we take the
-# full bootstrap path, exactly like the local Docker build does.
+# guaranteed configure failure. So every stage runs through scripts/ci-clean-env,
+# which UNSETS them.
+#
+# They must be unset, NOT set to "": our shell scripts read them as ${VAR:-} so
+# empty behaves like absent, but mach does not. mozboot/android.py resolves the
+# NDK with os.environ.get("ANDROID_NDK_HOME", <bootstrap default>), and an empty
+# string is still *present*, so it wins over the default — the path becomes ""
+# and bootstrap dies on `FileNotFoundError: 'source.properties'` (observed in run
+# 33070704928). GitHub's `env:` block cannot express "unset", hence the wrapper.
 name: Build cost probe
 
 on:
@@ -59,13 +66,6 @@ jobs:
       CARGO_HOME: /mnt/cargo
       RUSTUP_HOME: /mnt/rustup
       ANDROID_TARGETS: ${{ inputs.target }}
-      # Blank the runner's preinstalled Android env (see header).
-      ANDROID_HOME: ""
-      ANDROID_SDK_ROOT: ""
-      ANDROID_NDK: ""
-      ANDROID_NDK_HOME: ""
-      ANDROID_NDK_ROOT: ""
-      WASI_SYSROOT: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -100,19 +100,19 @@ jobs:
       # actions/cache tops out at 10 GB, well under ~/.mozbuild alone.
       - name: Stage 01 — fetch source
         run: |
-          t=$(date +%s); ./build.sh fetch; echo "fetch $(( $(date +%s) - t ))" >> /tmp/timings
+          t=$(date +%s); scripts/ci-clean-env ./build.sh fetch; echo "fetch $(( $(date +%s) - t ))" >> /tmp/timings
 
       - name: Stage 02 — bootstrap toolchain
         run: |
-          t=$(date +%s); ./build.sh bootstrap; echo "bootstrap $(( $(date +%s) - t ))" >> /tmp/timings
+          t=$(date +%s); scripts/ci-clean-env ./build.sh bootstrap; echo "bootstrap $(( $(date +%s) - t ))" >> /tmp/timings
 
       - name: Stage 03 — apply patches
         run: |
-          t=$(date +%s); ./build.sh patch; echo "patch $(( $(date +%s) - t ))" >> /tmp/timings
+          t=$(date +%s); scripts/ci-clean-env ./build.sh patch; echo "patch $(( $(date +%s) - t ))" >> /tmp/timings
 
       - name: Stage 04 — build + publish
         run: |
-          t=$(date +%s); ./build.sh build; echo "build $(( $(date +%s) - t ))" >> /tmp/timings
+          t=$(date +%s); scripts/ci-clean-env ./build.sh build; echo "build $(( $(date +%s) - t ))" >> /tmp/timings
 
       - name: Disk footprint
         if: always()
