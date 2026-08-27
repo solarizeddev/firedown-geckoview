@@ -1,0 +1,177 @@
+# Build cost probe — measure what a GeckoView build actually costs on a
+# GitHub-hosted runner, instead of guessing from generic Firefox-build priors.
+#
+# Manual dispatch ONLY. This burns real Actions minutes (this repo is private, so
+# every minute is billed against the account's monthly allowance and then at the
+# standard Linux rate), and a from-scratch Gecko build is measured in hours — it
+# must never fire automatically on push.
+#
+# WHY a single ABI: the probe answers "what does one clean compile cost here?".
+# Phase 1 is per-ABI and linear, so one ABI plus the reported phase split
+# extrapolates to the real two-ABI build without paying for it twice.
+#
+# THE DISK TRICK (why this works at all): a hosted runner guarantees only ~14 GB
+# free on /, and this build needs ~40 GB (source ~5 GB + ~/.mozbuild toolchain
+# 10-15 GB + one objdir 20-30 GB). But the runner's /mnt temp disk carries
+# ~65-75 GB free, so GECKO_SRC, MOZBUILD_STATE_PATH, CARGO_HOME and RUSTUP_HOME
+# are all relocated there. Without this the job dies on ENOSPC mid-compile.
+#
+# THE TOOLCHAIN TRAP: hosted runners preset ANDROID_HOME / ANDROID_SDK_ROOT /
+# ANDROID_NDK_HOME to their own preinstalled SDK+NDK. config/build.env honours
+# those, which would silently flip the build onto the reuse-existing-SDK path
+# (skipping `mach bootstrap`) with an NDK version Firefox does not pin — a
+# guaranteed configure failure. They are explicitly blanked below so we take the
+# full bootstrap path, exactly like the local Docker build does.
+name: Build cost probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Rust target triple to build (one ABI keeps the probe bounded)"
+        type: choice
+        default: aarch64-linux-android
+        options:
+          - aarch64-linux-android
+          - x86_64-linux-android
+      jobs:
+        description: "mach -jN (blank = runner core count)"
+        type: string
+        default: ""
+      upload_aar:
+        description: "Upload the built AAR as a run artifact (~165 MB against storage)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # GitHub hard-caps a job at 6h; stop just under so the summary step still runs
+    # and we learn how far it got rather than getting killed mid-compile.
+    timeout-minutes: 350
+
+    env:
+      GECKO_SRC: /mnt/gecko
+      MOZBUILD_STATE_PATH: /mnt/mozbuild
+      CARGO_HOME: /mnt/cargo
+      RUSTUP_HOME: /mnt/rustup
+      ANDROID_TARGETS: ${{ inputs.target }}
+      # Blank the runner's preinstalled Android env (see header).
+      ANDROID_HOME: ""
+      ANDROID_SDK_ROOT: ""
+      ANDROID_NDK: ""
+      ANDROID_NDK_HOME: ""
+      ANDROID_NDK_ROOT: ""
+      WASI_SYSROOT: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner facts
+        run: |
+          echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
+          {
+            echo "### Runner"
+            echo '```'
+            echo "cores    : $(nproc)"
+            echo "model    : $(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)"
+            echo "memory   : $(free -g | awk '/^Mem:/{print $2" GB"}')"
+            echo "glibc    : $(ldd --version | head -1)"
+            echo "os       : $(. /etc/os-release; echo "$PRETTY_NAME")"
+            df -h / /mnt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare /mnt scratch
+        run: |
+          sudo mkdir -p /mnt/gecko /mnt/mozbuild /mnt/cargo /mnt/rustup
+          sudo chown -R "$USER" /mnt/gecko /mnt/mozbuild /mnt/cargo /mnt/rustup
+          # -jN: the local default (16) would thrash a 2-4 core runner.
+          JOBS="${{ inputs.jobs }}"
+          [ -n "$JOBS" ] || JOBS="$(nproc)"
+          echo "BUILD_JOBS=$JOBS" >> "$GITHUB_ENV"
+          : > /tmp/timings
+
+      # Each stage is timed separately: the phase split (setup vs compile) is the
+      # actual finding here, because hosted runs can never cache the setup —
+      # actions/cache tops out at 10 GB, well under ~/.mozbuild alone.
+      - name: Stage 01 — fetch source
+        run: |
+          t=$(date +%s); ./build.sh fetch; echo "fetch $(( $(date +%s) - t ))" >> /tmp/timings
+
+      - name: Stage 02 — bootstrap toolchain
+        run: |
+          t=$(date +%s); ./build.sh bootstrap; echo "bootstrap $(( $(date +%s) - t ))" >> /tmp/timings
+
+      - name: Stage 03 — apply patches
+        run: |
+          t=$(date +%s); ./build.sh patch; echo "patch $(( $(date +%s) - t ))" >> /tmp/timings
+
+      - name: Stage 04 — build + publish
+        run: |
+          t=$(date +%s); ./build.sh build; echo "build $(( $(date +%s) - t ))" >> /tmp/timings
+
+      - name: Disk footprint
+        if: always()
+        run: |
+          {
+            echo "### Disk"
+            echo '```'
+            df -h / /mnt
+            du -sh /mnt/gecko /mnt/mozbuild /mnt/cargo 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cost summary
+        if: always()
+        run: |
+          TOTAL=$(( $(date +%s) - JOB_T0 ))
+          # GitHub rounds each job up to the whole minute.
+          MINS=$(( (TOTAL + 59) / 60 ))
+          # Full two-ABI estimate = this run + one more compile. Setup (fetch,
+          # bootstrap, patch) is paid once; only phase 1 repeats per ABI. The
+          # measured `build` already includes the fat repackage + publish, so this
+          # slightly OVER-counts — fine for a ceiling.
+          BUILD_SECS=$(awk '$1=="build"{print $2}' /tmp/timings)
+          [ -n "$BUILD_SECS" ] || BUILD_SECS=0
+          FULL_MINS=$(( (TOTAL + BUILD_SECS + 59) / 60 ))
+          {
+            echo "### Timing"
+            echo "| phase | duration |"
+            echo "|---|---|"
+            while read -r name secs; do
+              printf '| %s | %dm %02ds |\n' "$name" "$((secs / 60))" "$((secs % 60))"
+            done < /tmp/timings
+            printf '| **job total** | **%dm %02ds** |\n' "$((TOTAL / 60))" "$((TOTAL % 60))"
+            echo
+            echo "### Cost — one ABI billed at $MINS min; full build est. $FULL_MINS min"
+            echo "| runner | rate/min | this probe | est. full build (2 ABIs + fat) |"
+            echo "|---|---|---|---|"
+            awk -v mins="$MINS" -v full="$FULL_MINS" '
+              BEGIN {
+                n = split("standard-linux:0.006,larger-16vcpu:0.042,larger-32vcpu:0.082", r, ",")
+                for (i = 1; i <= n; i++) {
+                  split(r[i], kv, ":")
+                  printf "| %s | $%.3f | $%.2f | $%.2f |\n", kv[1], kv[2], mins*kv[2], full*kv[2]
+                }
+              }'
+            echo
+            echo "_Larger-runner rows are list-rate arithmetic only — they need a Team/Enterprise plan, and their vCPUs are hyperthreads, so wall-clock would differ._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Locate built AAR
+        if: always()
+        run: |
+          find "$HOME/.m2/repository/org/mozilla/geckoview" -name '*.aar' -exec ls -lh {} + 2>/dev/null || \
+            echo "no AAR published (build did not reach the publish step)"
+
+      - name: Upload AAR
+        if: ${{ inputs.upload_aar && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: geckoview-${{ inputs.target }}
+          path: /home/runner/.m2/repository/org/mozilla/geckoview/**/*.aar
+          retention-days: 3
