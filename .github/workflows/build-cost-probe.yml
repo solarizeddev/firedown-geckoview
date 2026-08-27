@@ -10,11 +10,19 @@
 # Phase 1 is per-ABI and linear, so one ABI plus the reported phase split
 # extrapolates to the real two-ABI build without paying for it twice.
 #
-# THE DISK TRICK (why this works at all): a hosted runner guarantees only ~14 GB
-# free on /, and this build needs ~40 GB (source ~5 GB + ~/.mozbuild toolchain
-# 10-15 GB + one objdir 20-30 GB). But the runner's /mnt temp disk carries
-# ~65-75 GB free, so GECKO_SRC, MOZBUILD_STATE_PATH, CARGO_HOME and RUSTUP_HOME
-# are all relocated there. Without this the job dies on ENOSPC mid-compile.
+# THE DISK PROBLEM: a hosted runner guarantees only ~14 GB free on /, and this
+# build needs ~40 GB (source ~5 GB + ~/.mozbuild toolchain 10-15 GB + one objdir
+# 20-30 GB). /mnt is NOT reliably the answer: its size follows the VM SKU, and on
+# the 2-core standard runner a private personal repo gets, it is small enough that
+# `mach bootstrap` alone exhausted it (run 33071269712 died unzipping the Android
+# emulator's system.img with "No space left on device").
+#
+# So: delete the preinstalled toolchains nobody here uses (~25-35 GB of .NET, GHC,
+# CodeQL, Android SDK, Docker images), then put the scratch on whichever of / and
+# /mnt actually has the most room afterwards, decided at runtime and exported via
+# GITHUB_ENV. Note that bootstrap provisions a full *development* environment —
+# emulator plus an x86_64 system image, 10+ GB a build-only job never runs — which
+# is a large part of what has to fit.
 #
 # THE TOOLCHAIN TRAP: hosted runners preset ANDROID_HOME / ANDROID_SDK_ROOT /
 # ANDROID_NDK_HOME to their own preinstalled SDK+NDK. config/build.env honours
@@ -60,11 +68,10 @@ jobs:
     # and we learn how far it got rather than getting killed mid-compile.
     timeout-minutes: 350
 
+    # GECKO_SRC / MOZBUILD_STATE_PATH / CARGO_HOME / RUSTUP_HOME are deliberately
+    # NOT set here: the scratch location is chosen at runtime (see "Reclaim disk")
+    # and exported through GITHUB_ENV, and a job-level env entry would shadow it.
     env:
-      GECKO_SRC: /mnt/gecko
-      MOZBUILD_STATE_PATH: /mnt/mozbuild
-      CARGO_HOME: /mnt/cargo
-      RUSTUP_HOME: /mnt/rustup
       ANDROID_TARGETS: ${{ inputs.target }}
 
     steps:
@@ -83,17 +90,60 @@ jobs:
             echo "os       : $(. /etc/os-release; echo "$PRETTY_NAME")"
             df -h / /mnt
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Prepare /mnt scratch
+      - name: Reclaim disk and pick scratch
         run: |
-          sudo mkdir -p /mnt/gecko /mnt/mozbuild /mnt/cargo /mnt/rustup
-          sudo chown -R "$USER" /mnt/gecko /mnt/mozbuild /mnt/cargo /mnt/rustup
-          # -jN: the local default (16) would thrash a 2-4 core runner.
+          # Everything below is preinstalled tooling this build never touches.
+          # Deleting it is the only way to get a Gecko-sized objdir onto a hosted
+          # runner; each path is guarded so a missing one is not an error.
+          before_root=$(df --output=avail -k / | tail -1)
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker system prune -af >/dev/null 2>&1 || true
+          after_root=$(df --output=avail -k / | tail -1)
+
+          # Pick the roomier filesystem rather than assuming /mnt is big — its
+          # size tracks the VM SKU (see header).
+          avail_mnt=$(df --output=avail -k /mnt 2>/dev/null | tail -1 || echo 0)
+          if [ "${avail_mnt:-0}" -gt "$after_root" ]; then
+            SCRATCH=/mnt/build
+          else
+            SCRATCH=/scratch
+          fi
+          sudo mkdir -p "$SCRATCH"/{gecko,mozbuild,cargo,rustup}
+          sudo chown -R "$USER" "$SCRATCH"
+
+          {
+            echo "GECKO_SRC=$SCRATCH/gecko"
+            echo "MOZBUILD_STATE_PATH=$SCRATCH/mozbuild"
+            echo "CARGO_HOME=$SCRATCH/cargo"
+            echo "RUSTUP_HOME=$SCRATCH/rustup"
+          } >> "$GITHUB_ENV"
+
+          # -jN: the local default (16) would thrash a 2-core runner.
           JOBS="${{ inputs.jobs }}"
           [ -n "$JOBS" ] || JOBS="$(nproc)"
           echo "BUILD_JOBS=$JOBS" >> "$GITHUB_ENV"
           : > /tmp/timings
+
+          # Echo to the log as well as the summary — a previous run put the disk
+          # figures only in the summary, which is exactly what you cannot read
+          # while diagnosing a failed step.
+          {
+            echo "### Disk after reclaim"
+            echo '```'
+            printf 'freed on / : %s GB\n' "$(( (after_root - before_root) / 1024 / 1024 ))"
+            printf 'scratch    : %s\n' "$SCRATCH"
+            df -h / /mnt
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Each stage is timed separately: the phase split (setup vs compile) is the
       # actual finding here, because hosted runs can never cache the setup —
@@ -121,9 +171,9 @@ jobs:
             echo "### Disk"
             echo '```'
             df -h / /mnt
-            du -sh /mnt/gecko /mnt/mozbuild /mnt/cargo 2>/dev/null || true
+            du -sh "$GECKO_SRC" "$MOZBUILD_STATE_PATH" "$CARGO_HOME" 2>/dev/null || true
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cost summary
         if: always()
