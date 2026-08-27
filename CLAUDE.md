@@ -36,10 +36,10 @@ prior session.
 `mach bootstrap` the Android toolchain → apply Firedown's modifications →
 build each ABI + fat-AAR them and publish to `~/.m2` (mavenLocal) → print/apply
 the app's gradle wiring. Settings live in `config/build.env` (version,
-`ANDROID_TARGETS`, source method, app path). We ship **arm64-v8a only** — every
-target device is arm64, so x86_64 was dropped (it doubled the compile and forced
-the phase-2 fat-AAR merge). `ANDROID_TARGETS` is env-overridable, so an x86_64
-emulator build is one variable away; see the note in `config/build.env`.
+`ANDROID_TARGETS`, source method, app path). We ship **arm64-v8a + x86_64**
+(device + emulator), so the phase-2 fat-AAR merge applies. `ANDROID_TARGETS` is
+env-overridable (and forwarded into the container), so a one-ABI build — which
+skips the fat pass — is a variable away; see `config/build.env`.
 
 We build from source **because these changes can't be made from the embedding
 app** — they're inside GeckoView's own compiled code or default prefs. The
@@ -349,7 +349,8 @@ only the *toolchain-acquisition* differs (bootstrap vs reuse).
   `assembleWithGeckoBinariesRelease` task and the `…-withGeckoBinaries-release.aar`
   name are **gone** (symptom: gradle "task not found"). Tasks/AAR are now just
   `…Release` / `geckoview*-release.aar`.
-- **Phase 2 — SKIPPED for a single ABI.** With one target there is nothing to
+- **Phase 2 — SKIPPED when `ANDROID_TARGETS` names ONE ABI** (not the default;
+  see `config/build.env`). With one target there is nothing to
   merge, so `04-build.sh` publishes phase 1's own AAR (its objdir has a compile
   environment, and `$MOZCONFIG` still points at it) and skips everything below:
   no second objdir, no `--disable-compile-environment` mozconfig, no host-tool
@@ -495,9 +496,9 @@ the fat-AAR repackage) so all artifacts agree on the version, and `05-sync`
 warns if the published version doesn't match `GECKOVIEW_VERSION`. This is the
 coordinate the app's `app/build.gradle` `geckoviewVersion` must reference.
 Pinning only changes the version **label** — to ship newer engine code you must
-also bump `FIREFOX_VERSION`/`FIREFOX_TAG`. ABIs (`ANDROID_TARGETS`) default to
-arm64-v8a alone (`aarch64-linux-android`); adding a second target brings the fat
-pass back automatically.
+also bump `FIREFOX_VERSION`/`FIREFOX_TAG`. ABIs (`ANDROID_TARGETS`) are
+arm64-v8a + x86_64 (`aarch64-linux-android x86_64-linux-android`); narrowing to
+one target skips the fat pass automatically.
 
 **Bumping the pin against EXISTING objdirs (learned the hard way):** exporting
 `MOZ_BUILD_DATE` is NOT enough on an incremental rebuild — outside Mozilla
