@@ -263,73 +263,97 @@ done
 # ---------------------------------------------------------------------------
 # Phase 2 — fat-AAR repackage + publish to mavenLocal.
 # ---------------------------------------------------------------------------
-echo "== [phase 2] fat-AAR ($ABI_LIST) + publish to mavenLocal =="
-# Pick any built target as the "host" target for the repackage pass.
-FIRST_T="$(set -- $ANDROID_TARGETS; echo "$1")"
+TARGET_COUNT="$(set -- $ANDROID_TARGETS; echo $#)"
+if [ "$TARGET_COUNT" -eq 1 ]; then
+  # ONE ABI: there is nothing to merge, so the fat-AAR repackage is pure waste —
+  # skip it. Phase 1 already assembled this ABI's release AAR from an objdir that
+  # HAS a compile environment, and $MOZCONFIG still points at it, so the publish
+  # below runs straight against that objdir. Skipping also avoids the whole
+  # --disable-compile-environment apparatus (the minimal mozconfig, the
+  # EMBEDDED_UNIFFI_BINDGEN/NIMBUS_FML host-tool overrides) and the gradle
+  # configuration-cache collision between objdir-gv-<abi> and objdir-gv-fat that
+  # a second objdir introduces.
+  echo "== [phase 2] single ABI ($ABI_LIST) — skipping the fat-AAR repackage =="
+  PUB_AAR="${AAR_FOR_ABI[$ABI_LIST]}"
+  PUB_KIND="single-ABI $ABI_LIST"
+else
+  echo "== [phase 2] fat-AAR ($ABI_LIST) + publish to mavenLocal =="
+  # Pick any built target as the "host" target for the repackage pass.
+  FIRST_T="$(set -- $ANDROID_TARGETS; echo "$1")"
 
-# Phase 2 is a REPACKAGE (--disable-compile-environment), so it must NOT carry the
-# compile-only options from the template — configure rejects them in this mode
-# ("InvalidOptionError: --disable-rust-tests is not available in this
-# configuration"; same for --enable-strip/--enable-install-strip, etc.). Write a
-# MINIMAL mozconfig from scratch (overwrite, do NOT cp the template) with only the
-# packaging-relevant options:
-#   - --enable-application / --enable-release / --disable-debug / --disable-tests:
-#     confirmed valid with --disable-compile-environment (they evaluate before the
-#     rejected ones) and pin the release variant the publication is named after.
-#   - --enable-geckoview-lite: REQUIRED here too — computeArtifactId runs during
-#     the publish, so without it the fat-AAR would publish `geckoview-omni`, not
-#     `geckoview`. It's a dependency/substs flag, not compile-env-gated.
-#   - the fat-AAR inputs + --disable-compile-environment + target/objdir.
-# The per-ABI AARs are already release+stripped, so strip/crashreporter/etc. don't
-# belong in the repackage. MOZ_BUILD_DATE (version pin) is an exported env var, so
-# it still applies. SDK for the gradle publish: in Docker it's auto-detected from
-# bootstrap; the reuse path isn't exercised here (it hits the glibc wall — use
-# Docker).
-#
-# Host build tools: a --disable-compile-environment Android pass still needs the
-# UniFFI/Nimbus host binaries (HOST_RUST_PROGRAMS: embedded-uniffi-bindgen,
-# nimbus-fml) to assemble the AAR, but can't BUILD them, so configure's check_prog
-# errors ("Cannot find embedded-uniffi-bindgen" / "... nimbus-fml"). check_prog
-# honors a same-named env override, so point both at the copies phase 1 already
-# built in <objdir>/dist/host/bin (they're HOST tools — arch-independent — so
-# either per-ABI objdir's copy works). This is how Mozilla CI feeds the fat-AAR
-# pass too (it fetches the same toolchains); we just reuse what we already built.
-FIRST_ABI="$(abi_for_target "$FIRST_T")"
-FAT_HOSTBIN="$GECKO_SRC/objdir-gv-$FIRST_ABI/dist/host/bin"
-if [ ! -x "$FAT_HOSTBIN/embedded-uniffi-bindgen" ] || [ ! -x "$FAT_HOSTBIN/nimbus-fml" ]; then
-  echo "WARN: host tools not found under $FAT_HOSTBIN (embedded-uniffi-bindgen /" >&2
-  echo "      nimbus-fml). Phase 1 should have produced them; the fat-AAR configure" >&2
-  echo "      will fail without them." >&2
+  # Phase 2 is a REPACKAGE (--disable-compile-environment), so it must NOT carry the
+  # compile-only options from the template — configure rejects them in this mode
+  # ("InvalidOptionError: --disable-rust-tests is not available in this
+  # configuration"; same for --enable-strip/--enable-install-strip, etc.). Write a
+  # MINIMAL mozconfig from scratch (overwrite, do NOT cp the template) with only the
+  # packaging-relevant options:
+  #   - --enable-application / --enable-release / --disable-debug / --disable-tests:
+  #     confirmed valid with --disable-compile-environment (they evaluate before the
+  #     rejected ones) and pin the release variant the publication is named after.
+  #   - --enable-geckoview-lite: REQUIRED here too — computeArtifactId runs during
+  #     the publish, so without it the fat-AAR would publish `geckoview-omni`, not
+  #     `geckoview`. It's a dependency/substs flag, not compile-env-gated.
+  #   - the fat-AAR inputs + --disable-compile-environment + target/objdir.
+  # The per-ABI AARs are already release+stripped, so strip/crashreporter/etc. don't
+  # belong in the repackage. MOZ_BUILD_DATE (version pin) is an exported env var, so
+  # it still applies. SDK for the gradle publish: in Docker it's auto-detected from
+  # bootstrap; the reuse path isn't exercised here (it hits the glibc wall — use
+  # Docker).
+  #
+  # Host build tools: a --disable-compile-environment Android pass still needs the
+  # UniFFI/Nimbus host binaries (HOST_RUST_PROGRAMS: embedded-uniffi-bindgen,
+  # nimbus-fml) to assemble the AAR, but can't BUILD them, so configure's check_prog
+  # errors ("Cannot find embedded-uniffi-bindgen" / "... nimbus-fml"). check_prog
+  # honors a same-named env override, so point both at the copies phase 1 already
+  # built in <objdir>/dist/host/bin (they're HOST tools — arch-independent — so
+  # either per-ABI objdir's copy works). This is how Mozilla CI feeds the fat-AAR
+  # pass too (it fetches the same toolchains); we just reuse what we already built.
+  FIRST_ABI="$(abi_for_target "$FIRST_T")"
+  FAT_HOSTBIN="$GECKO_SRC/objdir-gv-$FIRST_ABI/dist/host/bin"
+  if [ ! -x "$FAT_HOSTBIN/embedded-uniffi-bindgen" ] || [ ! -x "$FAT_HOSTBIN/nimbus-fml" ]; then
+    echo "WARN: host tools not found under $FAT_HOSTBIN (embedded-uniffi-bindgen /" >&2
+    echo "      nimbus-fml). Phase 1 should have produced them; the fat-AAR configure" >&2
+    echo "      will fail without them." >&2
+  fi
+  {
+    echo "ac_add_options --enable-application=mobile/android"
+    echo "ac_add_options --enable-release"
+    echo "ac_add_options --disable-debug"
+    echo "ac_add_options --disable-tests"
+    echo "ac_add_options --enable-geckoview-lite"
+    echo "ac_add_options --disable-compile-environment"   # repackage only, no recompile
+    echo "ac_add_options --target=$FIRST_T"
+    echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-fat"
+    echo "export EMBEDDED_UNIFFI_BINDGEN=$FAT_HOSTBIN/embedded-uniffi-bindgen"
+    echo "export NIMBUS_FML=$FAT_HOSTBIN/nimbus-fml"
+    echo "export MOZ_ANDROID_FAT_AAR_ARCHITECTURES=$ABI_LIST"
+    for ABI in "${!AAR_FOR_ABI[@]}"; do
+      echo "export $(fatvar_for_abi "$ABI")=${AAR_FOR_ABI[$ABI]}"
+    done
+  } > "$MOZCONFIG"
+  echo "== fat-AAR mozconfig =="
+  cat "$MOZCONFIG"
+  echo
+
+  refresh_buildid "$GECKO_SRC/objdir-gv-fat"
+  refresh_configure "$GECKO_SRC/objdir-gv-fat"
+  ./mach build "${MACH_JOBS[@]}"
+  # Assemble the fat RELEASE AAR. This is the pass where
+  # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
+  # (objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar). The phase-2
+  # `./mach build` above only drives gradle for the DEBUG variant, so the release
+  # AAR must be built explicitly here, exactly as phase 1 does per-ABI.
+  ./mach gradle geckoview:assembleRelease
+  FAT_AAR="$(find "$GECKO_SRC/objdir-gv-fat" -path '*geckoview*outputs/aar*' \
+               -name 'geckoview*-release.aar' 2>/dev/null | head -1)"
+  if [ -z "$FAT_AAR" ] || [ ! -f "$FAT_AAR" ]; then
+    echo "ERROR: fat release AAR not found under objdir-gv-fat after assembleRelease." >&2
+    exit 1
+  fi
+  PUB_AAR="$FAT_AAR"
+  PUB_KIND="fat"
 fi
-{
-  echo "ac_add_options --enable-application=mobile/android"
-  echo "ac_add_options --enable-release"
-  echo "ac_add_options --disable-debug"
-  echo "ac_add_options --disable-tests"
-  echo "ac_add_options --enable-geckoview-lite"
-  echo "ac_add_options --disable-compile-environment"   # repackage only, no recompile
-  echo "ac_add_options --target=$FIRST_T"
-  echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/objdir-gv-fat"
-  echo "export EMBEDDED_UNIFFI_BINDGEN=$FAT_HOSTBIN/embedded-uniffi-bindgen"
-  echo "export NIMBUS_FML=$FAT_HOSTBIN/nimbus-fml"
-  echo "export MOZ_ANDROID_FAT_AAR_ARCHITECTURES=$ABI_LIST"
-  for ABI in "${!AAR_FOR_ABI[@]}"; do
-    echo "export $(fatvar_for_abi "$ABI")=${AAR_FOR_ABI[$ABI]}"
-  done
-} > "$MOZCONFIG"
-echo "== fat-AAR mozconfig =="
-cat "$MOZCONFIG"
-echo
 
-refresh_buildid "$GECKO_SRC/objdir-gv-fat"
-refresh_configure "$GECKO_SRC/objdir-gv-fat"
-./mach build "${MACH_JOBS[@]}"
-# Assemble the fat RELEASE AAR. This is the pass where
-# MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
-# (objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar). The phase-2
-# `./mach build` above only drives gradle for the DEBUG variant, so the release
-# AAR must be built explicitly here, exactly as phase 1 does per-ABI.
-./mach gradle geckoview:assembleRelease
 # Publish the `release` publication to mavenLocal. NOTE: GeckoView's release
 # MavenPublication only carries the POM + sources jar + javadoc jar — its publish
 # task graph has NO bundleReleaseAar dependency, so the main .aar is NOT installed
@@ -338,22 +362,17 @@ refresh_configure "$GECKO_SRC/objdir-gv-fat"
 # deps) and creates the mavenLocal GAV directory we drop the AAR into next.
 ./mach gradle geckoview:publishReleasePublicationToMavenLocal
 
-# Install the assembled fat AAR into the mavenLocal layout by hand, beside the POM
+# Install the assembled AAR ($PUB_KIND — fat, or the single ABI's own) into the
+# mavenLocal layout by hand, beside the POM
 # the publish just wrote, named <artifactId>-<version>.aar. mavenLocal resolution
 # then finds aar+pom by GAV (a local repo needs no checksums). The artifactId
 # (geckoview / geckoview-default / geckoview-omni — varies by update channel and
 # --enable-geckoview-lite) is read FROM the POM gradle wrote, not hardcoded.
-FAT_AAR="$(find "$GECKO_SRC/objdir-gv-fat" -path '*geckoview*outputs/aar*' \
-             -name 'geckoview*-release.aar' 2>/dev/null | head -1)"
-if [ -z "$FAT_AAR" ] || [ ! -f "$FAT_AAR" ]; then
-  echo "ERROR: fat release AAR not found under objdir-gv-fat after assembleRelease." >&2
-  exit 1
-fi
 M2_GV="${HOME}/.m2/repository/org/mozilla/geckoview"
 INSTALLED=0
 while IFS= read -r POM; do
   AAR_DST="${POM%.pom}.aar"
-  cp -f "$FAT_AAR" "$AAR_DST"
+  cp -f "$PUB_AAR" "$AAR_DST"
   # The publish attached no main artifact, so maven-publish wrote the POM with
   # <packaging>pom</packaging> — gradle then treats the module as metadata-only and
   # NEVER resolves the .aar we just placed (consumer: "package org.mozilla.geckoview
@@ -362,7 +381,7 @@ while IFS= read -r POM; do
   # plugin registers the `aar` type). No .module file is produced here, so the POM
   # is authoritative; mavenLocal needs no checksums.
   sed -i 's#<packaging>pom</packaging>#<packaging>aar</packaging>#' "$POM"
-  echo "   installed fat AAR -> $AAR_DST (POM packaging -> aar)"
+  echo "   installed $PUB_KIND AAR -> $AAR_DST (POM packaging -> aar)"
   INSTALLED=$((INSTALLED + 1))
 done < <(find "$M2_GV" -path "*/$GECKOVIEW_VERSION/*.pom" 2>/dev/null)
 if [ "$INSTALLED" -eq 0 ]; then
@@ -487,6 +506,6 @@ for pom in poms:
 PY
 
 echo
-echo "[ok] build complete. Multi-ABI ($ABI_LIST) published under"
+echo "[ok] build complete. $PUB_KIND ($ABI_LIST) published under"
 echo "     ~/.m2/repository/org/mozilla/geckoview/"
 echo "     Next: ./build.sh sync   (prints the exact app/build.gradle wiring)"
