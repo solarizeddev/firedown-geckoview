@@ -117,14 +117,20 @@ jobs:
           else
             SCRATCH=/scratch
           fi
-          sudo mkdir -p "$SCRATCH"/{gecko,mozbuild,cargo,rustup}
+          sudo mkdir -p "$SCRATCH"/{gecko,mozbuild}
           sudo chown -R "$USER" "$SCRATCH"
 
+          # CARGO_HOME / RUSTUP_HOME are deliberately left alone. Pointing
+          # RUSTUP_HOME at a fresh empty dir while `rustup` still resolves to the
+          # runner's preinstalled /home/runner/.cargo/bin/rustup leaves it with no
+          # toolchains — bootstrap's `rustup component add rustfmt` then dies with
+          # "could not choose a version of rustup to run ... no default is
+          # configured" (run 33071914682). The runner's Rust install is already
+          # correct, and cargo's build output lands in the objdir under GECKO_SRC
+          # regardless; only the registry cache stays on /.
           {
             echo "GECKO_SRC=$SCRATCH/gecko"
             echo "MOZBUILD_STATE_PATH=$SCRATCH/mozbuild"
-            echo "CARGO_HOME=$SCRATCH/cargo"
-            echo "RUSTUP_HOME=$SCRATCH/rustup"
           } >> "$GITHUB_ENV"
 
           # -jN: the local default (16) would thrash a 2-core runner.
@@ -156,6 +162,18 @@ jobs:
         run: |
           t=$(date +%s); scripts/ci-clean-env ./build.sh bootstrap; echo "bootstrap $(( $(date +%s) - t ))" >> /tmp/timings
 
+      # Bootstrap provisions a full development environment; the emulator, its
+      # system images and the generated AVD are only for RUNNING tests on a
+      # device, which this job never does. They are ~8-10 GB, and the objdir this
+      # runner still has to fit is 20-30 GB — so reclaim them before compiling.
+      - name: Trim bootstrap extras
+        run: |
+          rm -rf \
+            "$MOZBUILD_STATE_PATH/android-sdk-linux/emulator" \
+            "$MOZBUILD_STATE_PATH/android-sdk-linux/system-images" \
+            "$MOZBUILD_STATE_PATH/android-device" 2>/dev/null || true
+          df -h / | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Stage 03 — apply patches
         run: |
           t=$(date +%s); scripts/ci-clean-env ./build.sh patch; echo "patch $(( $(date +%s) - t ))" >> /tmp/timings
@@ -171,7 +189,7 @@ jobs:
             echo "### Disk"
             echo '```'
             df -h / /mnt
-            du -sh "$GECKO_SRC" "$MOZBUILD_STATE_PATH" "$CARGO_HOME" 2>/dev/null || true
+            du -sh "$GECKO_SRC" "$MOZBUILD_STATE_PATH" 2>/dev/null || true
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
