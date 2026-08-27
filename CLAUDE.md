@@ -338,6 +338,50 @@ Our app-facing mozconfig choices (version pin, `--enable-strip`, telemetry/DRM
 prefs, patches `0001`–`0003`, `BUILD_JOBS`) all still apply inside the container —
 only the *toolchain-acquisition* differs (bootstrap vs reuse).
 
+## Why the build is LOCAL-ONLY (hosted CI evaluated and rejected, Aug 2026)
+
+Don't re-open this without new information — it was measured, not guessed. A
+GitHub Actions probe (four runs, `build-cost-probe.yml`, since removed) got as far
+as configure on a hosted runner and never compiled a line. The blockers, in order
+of how hard they are to move:
+
+- **This repo is private and on a personal account, so it gets 2-core runners.**
+  GitHub's larger runners are an *organization* feature (Team / Enterprise Cloud) —
+  **no personal-account plan unlocks them**, Pro included. 2 vCPU against the build
+  box's 32 threads is ~16x, i.e. hours per ABI against a **6-hour hard job cap**.
+- **Disk.** Hosted runners guarantee ~14 GB free on `/`, and the SKU we get has NO
+  separate `/mnt` temp disk (both mounts report `/dev/root`). Even after deleting
+  the preinstalled toolchains (~26 GB reclaimed) and bootstrap's emulator +
+  system images (~8-10 GB it provisions for *running* tests), one objdir barely
+  fits. Two objdirs plus the fat pass — which needs every ABI on ONE machine —
+  do not.
+- **Nothing caches.** `actions/cache` tops out at 10 GB, below the ~6 GB toolchain
+  *or* the 5.8 GB source tree. Every hosted run is a clean build, so a buildid-only
+  re-pin costs the same as a milestone bump. Locally that same bump is an
+  incremental relink.
+- The runner image also actively fights this build: it presets
+  `ANDROID_HOME`/`ANDROID_NDK_HOME` (which `config/build.env` honours → silently
+  takes the reuse-SDK path with an NDK Firefox doesn't pin) and ships a Rust that
+  bootstrap "upgrades" rather than replaces, after which configure dies with
+  `Don't know how to translate x86_64-pc-linux-gnu for rustc`.
+
+Paying doesn't fix the economics: an org on Team plus 16-32 vCPU larger runners is
+**~$11-21 per full build** (billed per job-minute, no included-minutes allowance),
+and GitLab's 2xlarge — the 32 vCPU/128 GB/200 GB machine IronFox uses — carries a
+**12x compute-minute cost factor**, i.e. ~$24 per build on Premium. The one free
+option is **GitLab for Open Source** (free Ultimate + 50,000 compute minutes, which
+is how IronFox does exactly this build), and it requires the project to be public,
+OSI-licensed and non-commercial.
+
+If scheduled/triggered builds are ever wanted, the answer is a **self-hosted
+runner on the build box** — free on both GitHub and GitLab, keeps the
+`.docker-build/*` caches warm, no job cap, and it runs the same `./build.sh docker`
+documented above. Registering it needs repo-admin hands on the machine.
+
+Kept from that experiment because they're useful locally: `ANDROID_TARGETS` and
+`BUILD_JOBS` are overridable from the environment (and forwarded into the
+container), and `04-build.sh` skips the fat pass when only one ABI is requested.
+
 ## Build / publish mechanics
 
 - **Phase 1 (per ABI):** `mach build` cross-compiles Gecko (C++/Rust) for each
