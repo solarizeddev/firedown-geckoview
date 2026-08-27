@@ -257,12 +257,40 @@ behaviorally IDENTICAL for the modal CredMan path from FF151 through FF154.0.1
 and Nightly. (The one real change in that window — FF153's `dom/webauthn`
 rewrite — only restructured conditional mediation, which is hardcoded
 unavailable on Android, and threading.) The manifest permissions and both
-WebAuthn patches were verified intact. The breakage arrived with NO app or
-engine change because the enforcement lives in GMS, which SELF-UPDATES
-silently — "it worked last month and nothing changed on our side" is exactly
-this wall's signature. Precedents: Mozilla's own Nightly cert was once missing
-from the same list (bug 1870436); bug 2009251 is the same shape on official
-Firefox 148.
+WebAuthn patches were verified intact.
+
+**The enforcement is PER-PROVIDER, and it arrived through silent provider
+updates — which is why "it worked last month and nothing changed on our side"
+was literally true.** Every Credential Manager PROVIDER must validate an
+origin-asserting caller against a trusted-browser list (honoring origins from
+arbitrary apps would be a phishing engine), and each provider shipped that
+validation on its own schedule:
+- **Google Play services / Google Password Manager**: the
+  `FetchAllowlistedOriginOperation` rejection above, against Google's
+  `apps.json`.
+- **Proton Pass** (the provider on the reporting device): validation was
+  INTRODUCED 2026-04-20 (`protonpass/android-pass` commit `855c6025`,
+  "fix(passkeys): validate caller origin before signing WebAuthn assertions" —
+  before it, Proton Pass signed for ANY origin-asserting caller, which is why
+  unlisted browsers used to work). It checks a VENDORED SNAPSHOT of Google's
+  `apps.json` (`PasskeyOriginVerifier` + `passkey_privileged_browsers_allowlist`,
+  snapshot 2026-07-23, ~70 entries — no IronFox, no Firedown) and rejects with
+  logcat `"Rejecting passkey request: caller=… not in privileged allowlist"`.
+  Updating/installing a current Proton Pass build is what flips a device from
+  working to broken.
+- **Bitwarden** shipped its own enforcement wave (their android issue #6463,
+  2026.1.0) with its own list; **Keyguard** vendors Google's list PLUS its own
+  additions — IronFox got in via `AChep/keyguard-app` commit `5a9352b`
+  (`.github/update_gpm_passkeys_priv_apps.py`), which is why IronFox works
+  where Keyguard is the provider and nowhere else.
+Precedents upstream: Mozilla Nightly's own cert was once missing from Google's
+list (bug 1870436); bug 2009251 is the same shape on official Firefox 148.
+
+**Symptom decoding tip:** webauthn.io (SimpleWebAuthn) maps the raw
+`NotSupportedError` to a misleading friendly message — "No available
+authenticator supported any of the specified pubKeyCredParams" on create,
+"authentication ceremony was sent an abort signal" for an AbortError. Neither
+is about algorithms or aborts; check logcat for the provider rejection line.
 
 **No client-side bypass exists, by design.** Without `setOrigin`, Credential
 Manager validates the rpId against the CALLING APP's own Digital Asset Links,
@@ -270,21 +298,25 @@ so a browser cannot act for arbitrary websites that way. `0001`/`0007` remain
 correct and are unrelated — do not "fix" them in response to this symptom.
 
 **Remedies (all external to this repo):**
-- Register the browser in Google's privileged-apps list via the request form
-  linked from the Android "privileged apps" docs
-  (https://docs.google.com/forms/d/e/1FAIpQLScRuk9tTg0QPfSWl9SbpbIorX8xx2FCXlmoUYftCX2MxG4qyg/viewform),
-  submitting the package name + the SHA-256 signing-cert fingerprint of every
-  build that should work: the RELEASE cert (`./gradlew signingReport`, or
-  `keytool -printcert -jarfile app-release.apk`), and optionally each dev
-  machine's DEBUG keystore cert — a debug install is rejected on the debug
-  cert (that is the fingerprint in the log above). Propagation is on Google's
-  schedule; GMS caches the fetched list.
-- Third-party credential providers (Bitwarden, Proton Pass, …) keep their OWN
-  allowlists (some also consume Google's `apps.json`) — request/PR inclusion
-  there separately; that is how smaller Gecko/Chromium forks got in.
-- Until listed, passkeys stored in Google Password Manager cannot be exercised
-  from Firedown at all; a passkey held by a provider that trusts the browser
-  still works. Nothing in the build can change this.
+- **Google's privileged-apps registration form** (linked from the Android
+  "privileged apps" docs:
+  https://docs.google.com/forms/d/e/1FAIpQLScRuk9tTg0QPfSWl9SbpbIorX8xx2FCXlmoUYftCX2MxG4qyg/viewform)
+  is the HIGHEST-LEVERAGE step: Proton Pass (and others) strictly mirror
+  Google's list, so landing there fixes GPM AND every mirroring provider at
+  their next snapshot refresh. Submit `com.solarized.firedown` + the RELEASE
+  signing-cert SHA-256
+  `BF:14:47:0B:05:0E:F8:2F:31:F1:B4:22:E6:E9:15:7A:F9:35:C8:9A:49:DB:42:29:92:F8:5B:7A:BE:9F:A9:D7`
+  (extracted from the published v1.1.92 APK's v2 signing block; re-derive with
+  `./gradlew signingReport` or `keytool -printcert -jarfile app-release.apk`).
+  A DEBUG install is rejected on the dev machine's debug-keystore cert instead
+  — register that fingerprint too if debug builds should pass.
+- **Per-provider additions** where the provider keeps its own list: Keyguard
+  takes community PRs to `update_gpm_passkeys_priv_apps.py` (the IronFox
+  commit is the template); Bitwarden accepts requests for its list. Proton
+  Pass currently vendors Google's list verbatim, so the Google form is the
+  only door there.
+- Until listed, passkey ceremonies from Firedown fail against every enforcing
+  provider; nothing in the build can change this.
 
 ### play-services-fido: gone entirely as of `0007` (was a load-only requirement)
 
