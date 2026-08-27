@@ -78,8 +78,16 @@ DOCKER_TTY=()
 if [ -t 0 ] && [ -t 1 ]; then
   DOCKER_TTY=(-it)
 fi
+# `-e VAR` (no value) forwards the HOST's value, and passes nothing when the var
+# is unset — so config/build.env's `${VAR:-default}` still wins by default. Both
+# of these are documented there as overridable from the environment, which is only
+# true inside the container if they are forwarded here:
+#   ANDROID_TARGETS=x86_64-linux-android ./build.sh docker build   # emulator ABI
+#   BUILD_JOBS=8 ./build.sh docker build                           # bound the RAM
 exec docker run --rm "${DOCKER_TTY[@]}" \
   -e PYTHONUNBUFFERED=1 \
+  -e ANDROID_TARGETS \
+  -e BUILD_JOBS \
   -v "$ROOT":/work/src \
   -v "$BUILDDIR/gecko":/work/src/gecko \
   -v "$BUILDDIR/mozbuild":/home/builder/.mozbuild \
