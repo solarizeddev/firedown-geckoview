@@ -479,13 +479,25 @@ container), and `04-build.sh` skips the fat pass when only one ABI is requested.
   mozconfig: application + release + **`--enable-geckoview-lite`** (required here
   too, or the fat-AAR publishes `geckoview-omni`) + the fat-AAR inputs. The version
   pin rides along via the exported `MOZ_BUILD_DATE`. It ALSO needs the
-  `HOST_RUST_PROGRAMS` host tools (`embedded-uniffi-bindgen`, `nimbus-fml`) — a
+  host tools `embedded-uniffi-bindgen` + `nimbus-fml` — a
   `--disable-compile-environment` Android pass *uses* them to assemble but can't
-  *build* them, so configure's `check_prog` errors ("Cannot find
+  *build* them, so configure's `check_host_bin_prog` errors ("Cannot find
   embedded-uniffi-bindgen"). `04-build.sh` sets `EMBEDDED_UNIFFI_BINDGEN` /
-  `NIMBUS_FML` env overrides pointing at the copies **phase 1 already built** in
+  `NIMBUS_FML` env overrides pointing at the copies **phase 1 built** in
   `<per-ABI objdir>/dist/host/bin/` (they're host tools → arch-independent, either
   objdir's copy works; same tools Mozilla CI fetches for its fat-AAR task).
+  **FF155 trap:** `nimbus-fml` is still a plain `HOST_RUST_PROGRAMS` entry and
+  falls out of a normal `./mach build`, but `embedded-uniffi-bindgen` was rewritten
+  to `HostRustProgram(..., output_category="uniffi-target")`. An `output_category`
+  marks the program **non-default** (the backend emits `uniffi-target:: <program>`
+  + `MOZBUILD_NON_DEFAULT_TARGETS`), so the default phase-1 build silently stops
+  producing it — symptom: phase 1 succeeds, then the fat-AAR configure dies on
+  "Cannot find embedded-uniffi-bindgen", with only uniffi *libraries* (`.rlib`) in
+  the objdir and no binary. Phase 1 therefore requests the category explicitly:
+  `./mach build services/app-services-tools/embedded-uniffi-bindgen/uniffi-target`
+  (the build system's own `<relobjdir>/<output_category>` target, which mach
+  resolves to `make -C <that dir> uniffi-target`), then fails loudly if the binary
+  still isn't in `dist/host/bin/`. Re-check that `moz.build` on a milestone bump.
 - **Quick single-ABI test:** `./build.sh publish-abi <triple>` (e.g.
   `./build.sh docker publish-abi aarch64-linux-android`) publishes ONE already-built
   per-ABI AAR to mavenLocal, skipping the fat-AAR entirely — it reuses that ABI's

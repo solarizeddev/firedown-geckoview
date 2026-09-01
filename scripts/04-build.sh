@@ -242,6 +242,29 @@ for T in $ANDROID_TARGETS; do
   refresh_buildid "$GECKO_SRC/$OBJ"
   refresh_configure "$GECKO_SRC/$OBJ"
   ./mach build "${MACH_JOBS[@]}"
+  # FF155: embedded-uniffi-bindgen was rewritten from a plain HOST_RUST_PROGRAMS
+  # entry to HostRustProgram(..., output_category="uniffi-target"). An
+  # output_category marks the program NON-DEFAULT (the backend emits
+  # `uniffi-target:: <program>` + MOZBUILD_NON_DEFAULT_TARGETS in that dir's
+  # Makefile), so the plain `./mach build` above no longer produces it — yet the
+  # phase-2 fat-AAR configure still check_host_bin_prog's it and borrows THIS
+  # objdir's copy via FAT_HOSTBIN. (nimbus-fml is still a plain HOST_RUST_PROGRAMS
+  # and is built normally; only its sibling changed.) Request the category
+  # explicitly: the build system's own target for the object is
+  # <relobjdir>/<output_category>, which mach resolves to
+  # `make -C services/app-services-tools/embedded-uniffi-bindgen uniffi-target`
+  # and lands the binary in dist/host/bin/. Cheap — one small host Rust crate.
+  # Symptom without this, at the fat-AAR configure:
+  #   checking for embedded-uniffi-bindgen... not found
+  #   ERROR: Cannot find embedded-uniffi-bindgen
+  ./mach build "${MACH_JOBS[@]}" services/app-services-tools/embedded-uniffi-bindgen/uniffi-target
+  if [ ! -x "$GECKO_SRC/$OBJ/dist/host/bin/embedded-uniffi-bindgen" ]; then
+    echo "ERROR: embedded-uniffi-bindgen still missing from $OBJ/dist/host/bin after" >&2
+    echo "       building its uniffi-target category — the output_category or target" >&2
+    echo "       name moved again. Re-verify services/app-services-tools/" >&2
+    echo "       embedded-uniffi-bindgen/moz.build and update this step." >&2
+    exit 1
+  fi
   # GeckoView dropped the withGeckoBinaries/withoutGeckoBinaries product flavors:
   # gecko binaries are now configured onto the plain `release` variant
   # (configureVariantWithGeckoBinaries), so the task is `assembleRelease` and the
@@ -310,10 +333,17 @@ else
   # pass too (it fetches the same toolchains); we just reuse what we already built.
   FIRST_ABI="$(abi_for_target "$FIRST_T")"
   FAT_HOSTBIN="$GECKO_SRC/objdir-gv-$FIRST_ABI/dist/host/bin"
+  # Hard error, not a warning: phase 1 now builds both explicitly (nimbus-fml via
+  # the default build, embedded-uniffi-bindgen via its non-default uniffi-target
+  # category — see the phase-1 loop), so a miss here means that step regressed.
+  # Stop here with a clear message rather than letting the fat-AAR configure fail
+  # on the less obvious "Cannot find embedded-uniffi-bindgen".
   if [ ! -x "$FAT_HOSTBIN/embedded-uniffi-bindgen" ] || [ ! -x "$FAT_HOSTBIN/nimbus-fml" ]; then
-    echo "WARN: host tools not found under $FAT_HOSTBIN (embedded-uniffi-bindgen /" >&2
-    echo "      nimbus-fml). Phase 1 should have produced them; the fat-AAR configure" >&2
-    echo "      will fail without them." >&2
+    echo "ERROR: host tools missing under $FAT_HOSTBIN (need embedded-uniffi-bindgen" >&2
+    echo "       AND nimbus-fml). Phase 1 should have produced both; the fat-AAR" >&2
+    echo "       configure check_host_bin_prog's them and cannot build them itself" >&2
+    echo "       (--disable-compile-environment). See the uniffi-target step in phase 1." >&2
+    exit 1
   fi
   {
     echo "ac_add_options --enable-application=mobile/android"
