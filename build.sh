@@ -7,6 +7,10 @@
 #   ./build.sh patch     # 03  apply Firedown patches (idempotent)
 #   ./build.sh build     # 04  build + publish AAR to mavenLocal
 #   ./build.sh sync      # 05  print app wiring  (add --apply to edit firedown)
+#   ./build.sh publish   # 06  publish ~/.m2's pinned AAR as a GitHub Release so
+#                        #     another machine gets it via the app's gradle sync
+#                        #     (--package-only: write dist/ only). See
+#                        #     scripts/06-publish-release.sh.
 #   ./build.sh publish-abi <triple>   # publish ONE already-built per-ABI AAR to
 #                        #     mavenLocal (skip the fat-AAR) — quick single-ABI
 #                        #     device/emulator test, e.g. publish-abi aarch64-linux-android
@@ -33,6 +37,7 @@ case "${1:-all}" in
   patch)     bash "$S/03-apply-patches.sh" ;;
   build)     bash "$S/04-build.sh" ;;
   sync)      shift; bash "$S/05-sync-to-app.sh" "$@" ;;
+  publish)   shift; bash "$S/06-publish-release.sh" "$@" ;;
   publish-abi) shift; bash "$S/publish-abi.sh" "$@" ;;
   docker)    shift; bash "$ROOT/docker/build-in-docker.sh" "$@" ;;
   all)
@@ -43,7 +48,7 @@ case "${1:-all}" in
     bash "$S/05-sync-to-app.sh"
     ;;
   *)
-    echo "usage: ./build.sh {bump|prereqs|fetch|bootstrap|patch|build|sync|all|docker}" >&2
+    echo "usage: ./build.sh {bump|prereqs|fetch|bootstrap|patch|build|sync|publish|all|docker}" >&2
     exit 2
     ;;
 esac

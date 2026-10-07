@@ -12,3 +12,6 @@ objdir*/
 
 # Docker build caches (gecko checkout, ~/.mozbuild, ~/.cargo bind mounts).
 .docker-build/
+
+# Release tarballs written by scripts/06-publish-release.sh (uploaded to GitHub Releases).
+dist/

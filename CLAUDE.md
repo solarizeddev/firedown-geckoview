@@ -17,6 +17,9 @@ prior session.
   two in lockstep if you touch both, but `main` is the source of truth.
 - Push with `git push -u origin main` (retry with exponential backoff on network
   errors). Don't open a PR unless asked.
+- **Shipping the result to another machine is `./build.sh publish`** (a GitHub
+  Release of the `~/.m2` entry) — see "Shipping the AAR" below. The source tree
+  and toolchain caches never migrate; only the published AAR does.
 - The build/patch design is below. **Do not run a full `mach build` in-session.**
   If asked to verify, the cheap gate is `./build.sh fetch && ./build.sh patch`
   (confirms the patch anchors still match the target Firefox version before any
@@ -511,6 +514,40 @@ container), and `04-build.sh` skips the fat pass when only one ABI is requested.
   `~/.m2` rather than hardcoding, and prints/edits the app's `settings.gradle`
   (`mavenLocal()`) + `app/build.gradle` (the geckoview line).
 
+## Shipping the AAR — `./build.sh publish` (GitHub Releases)
+
+The built AAR lives in `~/.m2` (mavenLocal) and used to live ONLY there, on
+the build box; the app's `exclusiveContent { mavenLocal() }` pin meant no other
+machine could build the app. `./build.sh publish` (`scripts/06-publish-release.sh`)
+tars the published GAV directory — `org/mozilla/geckoview/<artifactId>/
+<GECKOVIEW_VERSION>/` (aar, the packaging-rewritten + deps-injected POM, sources
+and javadoc jars), paths relative to `org/mozilla/geckoview` — and uploads it
+as a Release tagged **`geckoview-<version>`** with a `.sha256`. The app's
+`scripts/fetch-prebuilts.sh` (run from its `settings.gradle` on every sync)
+extracts it straight into the same `~/.m2` path when the pinned version
+(`firedown.geckoviewVersion` in firedown's `gradle.properties`) is missing —
+byte-for-byte what 04-build.sh would have installed, so the app cannot tell a
+fetched GeckoView from a locally built one. Checklist: firedown's
+`docs/NEW-MACHINE.md`.
+
+- **One string names everything**: the Maven version = `GECKOVIEW_VERSION`
+  here = the release tag minus `geckoview-` = the app pin. Nothing to keep in
+  step; `./build.sh bump` already moves the first.
+- **A coordinate is published ONCE.** The script refuses when the release
+  exists: a different AAR under the same version would silently diverge from
+  what other machines already hold. Any rebuild that should ship gets a new
+  `GECKOVIEW_BUILD_DATE` (`./build.sh bump <milestone>.<newbuildid>`), even on
+  the same Firefox tag.
+- It refuses the two half-installed states the publish mechanics above
+  describe (no `.aar` beside the POM; `<packaging>pom</packaging>`), warns on
+  an empty `<dependencies>` and on a dirty tree (the git tag records the patch
+  set at HEAD), and needs `GECKOVIEW_BUILD_DATE` pinned — a wall-clock version
+  is unreferenceable. `--package-only` writes `dist/` without tagging/uploading.
+- Why Releases: the AAR is ~165 MB. LFS keeps every revision in every clone
+  and meters private-repo bandwidth; GitHub Packages' free private tier holds
+  ~3 of them; a Release asset is free, unmetered, 2 GB, and `gh` carries the
+  private-repo login on both ends.
+
 ## After changing a patch / bumping the version
 
 - **Bumping the version is one command: `./build.sh bump <coordinate>`** (e.g.
@@ -539,8 +576,10 @@ container), and `04-build.sh` skips the fat pass when only one ABI is requested.
   the old version.
 - Re-run `./build.sh patch` and confirm each applier reports `[ok]` (not an
   anchor error). Re-running is idempotent (`[skip]` once markers are present).
-- Rebuild and re-`sync`. Revert the app's experimental microG
-  `play-services-fido` swap (the source build supersedes it).
+- Rebuild, re-`sync`, then `./build.sh publish` and pin the new version in the
+  app's `gradle.properties` (`firedown.geckoviewVersion`) so other machines
+  fetch it. Revert the app's experimental microG `play-services-fido` swap (the
+  source build supersedes it).
 
 ### Pinning the GeckoView version (`MOZ_BUILD_DATE`)
 
