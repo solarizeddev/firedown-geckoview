@@ -79,11 +79,26 @@ if ! grep -q '<dependency>' "$POM"; then
   echo "WARNING: $POM carries no <dependency> entries — the POM-deps injection did not" >&2
   echo "         run; consumers will have to hand-pin GeckoView's transitive deps." >&2
 fi
-if ! unzip -l "$AAR" 2>/dev/null | grep -q 'classes.jar'; then
-  echo "ERROR: $AAR has no classes.jar — not a usable AAR" >&2
-  exit 1
-fi
-ABIS="$(unzip -l "$AAR" | sed -n 's#.* jni/\([^/]*\)/libxul.so$#\1#p' | sort | tr '\n' ' ')"
+# Inspect the AAR with Python's zipfile, NOT `unzip`: unzip is not in a base
+# Arch install, and a missing binary made `unzip -l | grep classes.jar` read as
+# "no classes.jar" on the very box that built a perfectly good AAR (reported).
+# Python is always present here — mach needs it.
+AAR_INFO="$(python3 -I - "$AAR" <<'ZIPCHK'
+import sys, zipfile
+try:
+    names = zipfile.ZipFile(sys.argv[1]).namelist()
+except Exception as e:
+    print("ERROR " + str(e)); sys.exit(0)
+has_classes = "classes.jar" in names
+abis = sorted({n.split("/")[1] for n in names if n.startswith("jni/") and n.endswith("/libxul.so")})
+print(("ok" if has_classes else "noclasses") + " " + " ".join(abis))
+ZIPCHK
+)"
+case "$AAR_INFO" in
+  ERROR*)     echo "ERROR: $AAR is not a readable zip: ${AAR_INFO#ERROR }" >&2; exit 1 ;;
+  noclasses*) echo "ERROR: $AAR has no classes.jar — not a usable AAR" >&2; exit 1 ;;
+esac
+ABIS="${AAR_INFO#ok }"
 echo "== Packaging $ART_ID:$VER  (ABIs in AAR: ${ABIS:-?})"
 
 DIST="$ROOT/dist"
