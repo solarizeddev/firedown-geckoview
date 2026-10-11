@@ -121,7 +121,16 @@ fi
 command -v gh >/dev/null || { echo "ERROR: gh (GitHub CLI) not installed" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "ERROR: gh is not logged in — run: gh auth login" >&2; exit 1; }
 cd "$ROOT"
-if gh release view "$TAG" >/dev/null 2>&1; then
+# Name the GitHub repo EXPLICITLY, from origin: gh otherwise infers it from the
+# remotes and refuses when there is more than one ("No default remote
+# repository has been set") — which is exactly the case in a fork carrying an
+# `upstream` remote. The release must land on OUR repo, never upstream's.
+GH_REPO="$(git -C "$ROOT" remote get-url origin | sed -E 's#^.*github\.com[:/]##; s#\.git$##')"
+if [[ ! "$GH_REPO" =~ ^[^/]+/[^/]+$ ]]; then
+  echo "ERROR: cannot derive owner/repo from origin ($(git -C "$ROOT" remote get-url origin))" >&2
+  exit 1
+fi
+if gh release view -R "$GH_REPO" "$TAG" >/dev/null 2>&1; then
   echo "ERROR: release $TAG already exists on GitHub. A coordinate is published ONCE:" >&2
   echo "       a different AAR under the same version would silently diverge from what" >&2
   echo "       other machines already fetched. Bump GECKOVIEW_BUILD_DATE" >&2
@@ -147,7 +156,7 @@ Consumed by firedown/scripts/fetch-prebuilts.sh (extracts into ~/.m2/repository/
 Pin in firedown/gradle.properties:
     firedown.geckoviewVersion=$VER"
 
-gh release create "$TAG" "$ASSET" "$ASSET.sha256" \
+gh release create -R "$GH_REPO" "$TAG" "$ASSET" "$ASSET.sha256" \
   --title "GeckoView $VER" --notes "$NOTES"
 
 echo
