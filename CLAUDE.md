@@ -591,7 +591,19 @@ fetched GeckoView from a locally built one. Checklist: firedown's
 ### Pinning the GeckoView version (`MOZ_BUILD_DATE`)
 
 The published Maven coordinate is `<milestone>.<buildid>`, e.g.
-`151.0.20260601110758`. The milestone comes from the source; the buildid is
+`151.0.20260601110758`. **The milestone is `config/milestone.txt` (major.minor),
+NOT `MOZ_APP_VERSION`** — GeckoView's gradle names the artifact after
+`GRE_MILESTONE`, so a **dot release publishes under the SAME major.minor**:
+Firefox 158.0.1 source publishes `158.0.<buildid>`, never `158.0.1.<buildid>`.
+The coordinate cannot distinguish 158.0 from 158.0.1; only the buildid can.
+`config/build.env` therefore derives `GECKOVIEW_VERSION` from
+`FIREFOX_VERSION` reduced to major.minor (`GECKOVIEW_MILESTONE`), while
+`FIREFOX_VERSION`/`FIREFOX_TAG` keep the full dot-release string so fetch pulls
+the right tag. Learned on 158.0.1: deriving the coordinate from
+`FIREFOX_VERSION` made the POM-install step look under `158.0.1.<buildid>` while
+gradle had published `158.0.<buildid>` — "no published POM found", and `sync`
+reported a mismatch. To build a dot release: `./build.sh bump 158.0.1 <buildid>`
+(tag → `FIREFOX_158_0_1_RELEASE`, coordinate → `158.0.<buildid>`). The buildid is
 normally the build's wall clock (non-reproducible). `config/build.env`'s
 `GECKOVIEW_BUILD_DATE` (14-digit `YYYYMMDDHHMMSS`) pins it — `04-build.sh`
 exports it as `MOZ_BUILD_DATE` for **every** mach build (each per-ABI pass *and*

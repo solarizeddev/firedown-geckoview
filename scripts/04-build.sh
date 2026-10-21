@@ -26,7 +26,7 @@ source "$ROOT/config/build.env"
 # wall-clock buildid (non-reproducible).
 if [ -n "${GECKOVIEW_BUILD_DATE:-}" ]; then
   export MOZ_BUILD_DATE="$GECKOVIEW_BUILD_DATE"
-  echo "== pinning MOZ_BUILD_DATE=$MOZ_BUILD_DATE -> GeckoView ${FIREFOX_VERSION}.$MOZ_BUILD_DATE =="
+  echo "== pinning MOZ_BUILD_DATE=$MOZ_BUILD_DATE -> GeckoView ${GECKOVIEW_VERSION} =="
 fi
 
 # The pin only takes effect when <objdir>/buildid.h is (re)generated — and outside
