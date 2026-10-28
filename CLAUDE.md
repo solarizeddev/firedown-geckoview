@@ -282,12 +282,12 @@ a distinct configure/compile failure):
 | host tools (llvm-objdump, cbindgen) | `00-prereqs-arch.sh` packages (`llvm`, `rust-cbindgen`) | "Cannot find llvm-objdump", missing cbindgen |
 
 Still **manual** (version-pinned by Firefox, so we don't fetch blindly): the SDK
-**platform** — `sdkmanager "platforms;android-37.2"` (FF158 pins compileSdk
+**platform** — `sdkmanager "platforms;android-37.2"` (FF158–159 pin compileSdk
 major `37` + minor `2` + build-tools `37.0.0` in
 `build/moz.configure/android-sdk.configure`; it was `android-37.1` on FF154–157,
 `android-37.0` on FF153 and `android-36.1` on FF151, so re-check this string on
 a milestone bump) — and the **NDK must be the exact version FF pins: r30 on
-FF158** (r29 from FF151 through FF157 — the first NDK move in this repo's
+FF158–159** (r29 from FF151 through FF157 — the first NDK move in this repo's
 history; `python/mozboot/mozboot/android.py` `NDK_VERSION`); configure validates
 it. The Docker path is unaffected by either: `mach bootstrap` is idempotent and
 provisions the newly pinned NDK + platform into `.docker-build/mozbuild` beside
