@@ -367,18 +367,22 @@ else
 
   refresh_buildid "$GECKO_SRC/objdir-gv-fat"
   refresh_configure "$GECKO_SRC/objdir-gv-fat"
-  # The fat merge reads the per-ABI AARs through MOZ_ANDROID_FAT_AAR_<ABI>
-  # (paths in the environment), and gradle does not track their CONTENTS:
-  # with the paths unchanged it reports the merge up to date and repackages
-  # the native libs it merged last time. A rebuilt libxul then never reaches
-  # the published AAR (seen: patch 0010 compiled into both per-ABI libxul,
-  # absent from the fat AAR, "36 up-to-date"). The fat pass is a repackage
-  # and cheap, so drop its gradle outputs and let it merge from scratch;
-  # the check after assembleRelease catches anything this misses.
-  if [ -d "$GECKO_SRC/objdir-gv-fat/gradle/build" ]; then
-    echo "   clearing objdir-gv-fat/gradle/build (fat merge does not track AAR contents)"
-    rm -rf "$GECKO_SRC/objdir-gv-fat/gradle/build"
-  fi
+  # The fat pass does not notice when a per-ABI AAR changes under the same
+  # path. Its mach build unpacks each MOZ_ANDROID_FAT_AAR_<ABI> into
+  # dist/fat-aar/output (python/mozbuild/mozbuild/action/fat_aar.py), and
+  # gradle packs the native libs from dist/fat-aar/output/geckoview/jni; a
+  # rebuild kept the old unpacked copy there, and gradle's own outputs were
+  # up to date too. A rebuilt libxul then never reached the published AAR
+  # (seen: patch 0010 compiled into both per-ABI libxul, absent from the fat
+  # AAR; clearing gradle/build alone did not help). The fat pass is a
+  # repackage and cheap, so clear both and let it unpack and merge from
+  # scratch; the check after assembleRelease catches anything this misses.
+  for STALE in dist/fat-aar gradle/build; do
+    if [ -d "$GECKO_SRC/objdir-gv-fat/$STALE" ]; then
+      echo "   clearing objdir-gv-fat/$STALE (the fat pass does not track the per-ABI AARs)"
+      rm -rf "$GECKO_SRC/objdir-gv-fat/$STALE"
+    fi
+  done
   ./mach build "${MACH_JOBS[@]}"
   # Assemble the fat RELEASE AAR. This is the pass where
   # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
@@ -401,8 +405,8 @@ else
     if [ "$WANT" != "$GOT" ]; then
       echo "ERROR: jni/$ABI/libxul.so in the fat AAR differs from phase 1's" >&2
       echo "       ${AAR_FOR_ABI[$ABI]}" >&2
-      echo "       (fat $GOT, per-ABI $WANT). The fat merge reused stale" >&2
-      echo "       output; delete objdir-gv-fat and run the build again." >&2
+      echo "       (fat $GOT, per-ABI $WANT). The fat pass packed stale" >&2
+      echo "       native libs; delete objdir-gv-fat and run the build again." >&2
       exit 1
     fi
     echo "   fat AAR jni/$ABI/libxul.so matches phase 1 ($GOT)"
