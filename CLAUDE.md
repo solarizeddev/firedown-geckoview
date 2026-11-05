@@ -591,9 +591,12 @@ fetched GeckoView from a locally built one. Checklist: firedown's
 ### Pinning the GeckoView version (`MOZ_BUILD_DATE`)
 
 The published Maven coordinate is `<milestone>.<buildid>`, e.g.
-`151.0.20260601110758`. **The milestone is `config/milestone.txt` (major.minor),
-NOT `MOZ_APP_VERSION`** — GeckoView's gradle names the artifact after
-`GRE_MILESTONE`, so a **dot release publishes under the SAME major.minor**:
+`151.0.20260601110758`. **The "milestone" in the coordinate is only the
+major.minor of `MOZ_APP_VERSION`**: the root `build.gradle`'s
+`getVersionNumber()` splits `MOZ_APP_VERSION` on `.` and keeps parts `[0]`
+and `[1]` before appending the buildid. (`config/milestone.txt` is NOT where
+this comes from — on 159.0.1 it reads `159.0.1`; the truncation happens in
+gradle.) So a **dot release publishes under the SAME major.minor**:
 Firefox 158.0.1 source publishes `158.0.<buildid>`, never `158.0.1.<buildid>`.
 The coordinate cannot distinguish 158.0 from 158.0.1; only the buildid can.
 `config/build.env` therefore derives `GECKOVIEW_VERSION` from
