@@ -478,6 +478,17 @@ container), and `04-build.sh` skips the fat pass when only one ABI is requested.
      from the POM gradle wrote (don't hardcode `geckoview-default` — it changes
      with channel/lite). Verify
      with `unzip -l <aar> | grep classes.jar` after the build.
+  3b. **The fat merge does not track the per-ABI AARs' CONTENTS.** It reads them
+     through `MOZ_ANDROID_FAT_AAR_<ABI>` paths, so with the paths unchanged gradle
+     reports it up to date and repackages the native libs it merged LAST time:
+     patch 0010 was compiled into both per-ABI `libxul.so` and was missing from
+     the published fat AAR ("37 actionable tasks: 1 executed, 36 up-to-date"; the
+     packaged tarball had the same sha256 as before the rebuild). `04-build.sh`
+     now deletes `objdir-gv-fat/gradle/build` before the fat assemble, and after it
+     requires every ABI's `jni/<abi>/libxul.so` in the fat AAR to match phase 1's
+     per-ABI AAR byte for byte, failing loudly otherwise. To check an AAR for a
+     patch by hand: `unzip -p <aar> jni/arm64-v8a/libxul.so | strings | grep -c
+     "<a log string the patch adds>"`.
   4. **Inject GeckoView's transitive runtime deps into the POM** (`<dependencies>`)
      — the publish wrote an EMPTY `<dependencies>`, so unlike Mozilla's POM ours
      gives consumers nothing; every dep the app lacks otherwise has to be hand-pinned

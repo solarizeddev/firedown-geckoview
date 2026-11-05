@@ -367,6 +367,18 @@ else
 
   refresh_buildid "$GECKO_SRC/objdir-gv-fat"
   refresh_configure "$GECKO_SRC/objdir-gv-fat"
+  # The fat merge reads the per-ABI AARs through MOZ_ANDROID_FAT_AAR_<ABI>
+  # (paths in the environment), and gradle does not track their CONTENTS:
+  # with the paths unchanged it reports the merge up to date and repackages
+  # the native libs it merged last time. A rebuilt libxul then never reaches
+  # the published AAR (seen: patch 0010 compiled into both per-ABI libxul,
+  # absent from the fat AAR, "36 up-to-date"). The fat pass is a repackage
+  # and cheap, so drop its gradle outputs and let it merge from scratch;
+  # the check after assembleRelease catches anything this misses.
+  if [ -d "$GECKO_SRC/objdir-gv-fat/gradle/build" ]; then
+    echo "   clearing objdir-gv-fat/gradle/build (fat merge does not track AAR contents)"
+    rm -rf "$GECKO_SRC/objdir-gv-fat/gradle/build"
+  fi
   ./mach build "${MACH_JOBS[@]}"
   # Assemble the fat RELEASE AAR. This is the pass where
   # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
@@ -380,6 +392,21 @@ else
     echo "ERROR: fat release AAR not found under objdir-gv-fat after assembleRelease." >&2
     exit 1
   fi
+  # Every ABI's libxul in the fat AAR must be byte-identical to the one in the
+  # per-ABI AAR phase 1 just built. A stale merge otherwise publishes an
+  # engine without the current patches under the new version, silently.
+  for ABI in "${!AAR_FOR_ABI[@]}"; do
+    WANT="$(unzip -p "${AAR_FOR_ABI[$ABI]}" "jni/$ABI/libxul.so" | sha256sum | cut -d' ' -f1)"
+    GOT="$(unzip -p "$FAT_AAR" "jni/$ABI/libxul.so" | sha256sum | cut -d' ' -f1)"
+    if [ "$WANT" != "$GOT" ]; then
+      echo "ERROR: jni/$ABI/libxul.so in the fat AAR differs from phase 1's" >&2
+      echo "       ${AAR_FOR_ABI[$ABI]}" >&2
+      echo "       (fat $GOT, per-ABI $WANT). The fat merge reused stale" >&2
+      echo "       output; delete objdir-gv-fat and run the build again." >&2
+      exit 1
+    fi
+    echo "   fat AAR jni/$ABI/libxul.so matches phase 1 ($GOT)"
+  done
   PUB_AAR="$FAT_AAR"
   PUB_KIND="fat"
 fi
