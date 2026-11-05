@@ -345,6 +345,41 @@ else
     echo "       (--disable-compile-environment). See the uniffi-target step in phase 1." >&2
     exit 1
   fi
+  # The merge itself is a make rule in Gecko's top Makefile.in
+  # (recurse_android-fat-aar-artifact -> fat_aar.py). It reads one input per
+  # ABI from the MAKE variables MOZ_ANDROID_FAT_AAR_<ABI>, and each input
+  # must be a Maven zip holding the AAR at org/mozilla/geckoview/**/
+  # geckoview-*.aar (the target.maven.zip Mozilla CI's per-arch builds
+  # publish). Two traps, both silent:
+  #   - A mozconfig `export` reaches configure, not that make rule. With
+  #     the variable empty, fat_aar.py does not fail: it runs `mach artifact
+  #     install --job android-<arch>-opt` and DOWNLOADS MOZILLA'S CI BUILD of
+  #     that ABI into dist/fat-aar/input/. Every fat AAR this script built
+  #     before this fix carried Mozilla's native libraries (libxul and the
+  #     prefs in omni.ja) under our Java: the native patches never shipped.
+  #     Found when 0010 was compiled into both per-ABI libxul and missing
+  #     from the fat AAR, with dist/fat-aar/input/<abi>/target.maven.zip
+  #     present after the build.
+  #   - A bare AAR is not a Maven zip: fat_aar.py would find no geckoview
+  #     AAR inside it and stop.
+  # So wrap each per-ABI release AAR in a Maven-layout zip and export the
+  # variables into the ENVIRONMENT of the mach build that runs the rule
+  # (make takes its variables from the environment).
+  FAT_INPUTS="$GECKO_SRC/objdir-gv-fat-inputs"
+  rm -rf "$FAT_INPUTS"
+  for ABI in "${!AAR_FOR_ABI[@]}"; do
+    ZIP="$FAT_INPUTS/$ABI/target.maven.zip"
+    mkdir -p "$FAT_INPUTS/$ABI"
+    python3 - "${AAR_FOR_ABI[$ABI]}" "$ZIP" "$GECKOVIEW_VERSION" <<'PYZIP'
+import sys, zipfile
+aar, out, version = sys.argv[1], sys.argv[2], sys.argv[3]
+name = "geckoview/org/mozilla/geckoview/geckoview-firedown/%s/geckoview-firedown-%s.aar" % (version, version)
+with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+    z.write(aar, arcname=name)
+PYZIP
+    export "$(fatvar_for_abi "$ABI")=$ZIP"
+    echo "   fat input $ABI: $ZIP (wraps ${AAR_FOR_ABI[$ABI]})"
+  done
   {
     echo "ac_add_options --enable-application=mobile/android"
     echo "ac_add_options --enable-release"
@@ -358,7 +393,7 @@ else
     echo "export NIMBUS_FML=$FAT_HOSTBIN/nimbus-fml"
     echo "export MOZ_ANDROID_FAT_AAR_ARCHITECTURES=$ABI_LIST"
     for ABI in "${!AAR_FOR_ABI[@]}"; do
-      echo "export $(fatvar_for_abi "$ABI")=${AAR_FOR_ABI[$ABI]}"
+      echo "export $(fatvar_for_abi "$ABI")=$FAT_INPUTS/$ABI/target.maven.zip"
     done
   } > "$MOZCONFIG"
   echo "== fat-AAR mozconfig =="
@@ -384,6 +419,15 @@ else
     fi
   done
   ./mach build "${MACH_JOBS[@]}"
+  # fat_aar.py downloads into dist/fat-aar/input only when an input is
+  # missing (see above). Its presence means the merge packed Mozilla's
+  # binaries for that ABI.
+  if [ -e "$GECKO_SRC/objdir-gv-fat/dist/fat-aar/input" ]; then
+    echo "ERROR: the fat merge downloaded Mozilla's CI build instead of using ours:" >&2
+    ls -R "$GECKO_SRC/objdir-gv-fat/dist/fat-aar/input" >&2
+    echo "       MOZ_ANDROID_FAT_AAR_<ABI> did not reach Makefile.in's fat_aar rule." >&2
+    exit 1
+  fi
   # Assemble the fat RELEASE AAR. This is the pass where
   # MOZ_ANDROID_FAT_AAR_ARCHITECTURES merges every ABI's native libs into one AAR
   # (objdir-gv-fat/gradle/build/.../outputs/aar/geckoview-release.aar). The phase-2

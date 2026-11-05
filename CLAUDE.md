@@ -478,20 +478,30 @@ container), and `04-build.sh` skips the fat pass when only one ABI is requested.
      from the POM gradle wrote (don't hardcode `geckoview-default` — it changes
      with channel/lite). Verify
      with `unzip -l <aar> | grep classes.jar` after the build.
-  3b. **The fat pass does not track the per-ABI AARs' CONTENTS.** Its mach
-     build unpacks each `MOZ_ANDROID_FAT_AAR_<ABI>` into
-     `objdir-gv-fat/dist/fat-aar/output` (`fat_aar.py`), and gradle packs the
-     native libs from `dist/fat-aar/output/geckoview/jni`. With the AAR paths
-     unchanged, a rebuild kept the old unpacked libs AND gradle's outputs were
-     up to date: patch 0010 was compiled into both per-ABI `libxul.so` and was
-     missing from the published fat AAR (the packaged tarball had the same
-     sha256 as before the rebuild). Clearing `gradle/build` alone did not fix it;
-     the stale copy was in `dist/fat-aar`. `04-build.sh` now deletes both before
-     the fat pass, and after it
-     requires every ABI's `jni/<abi>/libxul.so` in the fat AAR to match phase 1's
-     per-ABI AAR byte for byte, failing loudly otherwise. To check an AAR for a
-     patch by hand: `unzip -p <aar> jni/arm64-v8a/libxul.so | strings | grep -c
-     "<a log string the patch adds>"`.
+  3b. **The fat merge must be FED our per-ABI builds, or it downloads
+     Mozilla's.** The merge is a make rule in Gecko's top `Makefile.in`
+     (`recurse_android-fat-aar-artifact` → `fat_aar.py`). It reads one input per
+     ABI from the MAKE variables `MOZ_ANDROID_FAT_AAR_<ABI>`, each a Maven zip
+     holding the AAR at `org/mozilla/geckoview/**/geckoview-*.aar` (the
+     `target.maven.zip` Mozilla CI's per-arch builds publish). Until 2026-11 the
+     script set those variables only as mozconfig `export`s, which reach
+     configure and NOT that rule; with the variable empty, `fat_aar.py` silently
+     runs `mach artifact install --job android-<arch>-opt` and **downloads
+     Mozilla's CI build of that ABI** into `objdir-gv-fat/dist/fat-aar/input/`.
+     So every fat AAR built before then carried Mozilla's native code (libxul,
+     and the prefs in `omni.ja`) under our Java: the Java patches shipped, the
+     native ones (0003–0006, 0010) did not, while About still showed our build
+     id (it comes from the Java `BuildConfig`). Found on 0010: compiled into both
+     per-ABI `libxul.so`, absent from the fat AAR, the same "wrong" hash on two
+     clean rebuilds, and `dist/fat-aar/input/<abi>/target.maven.zip` present.
+     Now `04-build.sh` wraps each per-ABI release AAR in a Maven-layout zip
+     (`objdir-gv-fat-inputs/<abi>/target.maven.zip`), exports the variables in
+     the shell that runs `./mach build`, clears `dist/fat-aar` and `gradle/build`
+     first, fails if `dist/fat-aar/input` exists afterwards (a download
+     happened), and requires every ABI's `jni/<abi>/libxul.so` in the fat AAR to
+     match phase 1's per-ABI AAR byte for byte. To check any AAR for a patch by
+     hand: `unzip -p <aar> jni/arm64-v8a/libxul.so | strings | grep -c "<a log
+     string the patch adds>"`.
   4. **Inject GeckoView's transitive runtime deps into the POM** (`<dependencies>`)
      — the publish wrote an EMPTY `<dependencies>`, so unlike Mozilla's POM ours
      gives consumers nothing; every dep the app lacks otherwise has to be hand-pinned
