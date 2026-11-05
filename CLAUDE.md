@@ -64,6 +64,7 @@ patch is gated on a marker or canonical content):
 | C++ edit | `firedown/patches/0005-prevent-fp-via-chrome-resources.sh` | In `nsScriptSecurityManager::CheckLoadURIFlags`, deny an http/https page loading the build's `chrome://` UI resources (fingerprint probe). IronFox-derived (`gecko-prevent-fingerprinting-via-chrome-resources`) but **self-contained** — a `SchemeIs` source check (no `nsINetUtil`/extra `#include`) + generic resource-prefix allowlist (no IronFox branding paths). Marker `FIREDOWN-CHROME-FP`. **Fails loudly** if the anchor moved. |
 | C++ edit | `firedown/patches/0006-serviceworker-webrequest-visibility.sh` | Fire `http-on-examine-response` from `InterceptedHttpChannel::OnStartRequest` so **ServiceWorker-synthesized responses become visible to `webRequest`** (`onHeadersReceived` + `filterResponseData`) — a capture-reach patch (NOT IronFox; ours). Marker `FIREDOWN-SW-WEBREQUEST`. **Fails loudly** if the anchor moved. See "ServiceWorker capture" below. |
 | Java + build edit | `firedown/patches/0007-webauthn-drop-gms-fido.sh` | Remove the GMS FIDO (`play-services-fido`) **runtime** dependency entirely (complements `0001`). Makes `WebAuthnTokenManager`'s `SUPPORTED_ALGORITHMS` lazy (the `<clinit>` GMS load that crashed) and `if (true)`-guards the three live GMS entry points (`isUVPAA`, `makeCredential`/`getAssertion` GMS fallbacks) so no GMS code runs; flips `geckoview/build.gradle` `play-services-fido` to `compileOnly` (compiles, not bundled). The app then drops the dep → **zero Google FIDO binary in the APK**, WebAuthn is Credential-Manager-only. Marker `FIREDOWN-WEBAUTHN-NOGMS`. **Fails loudly** if any anchor moved. See WebAuthn section. |
+| C++ edit | `firedown/patches/0010-eme-disabled-notice.sh` | When a page asks for Widevine while `media.eme.enabled` is false, `MediaKeySystemAccessManager::RequestMediaKeySystemAccess` refuses it before the app-approval step, so GeckoView never tells the app. This makes that branch ALSO start a `MediaKeySystemAccessPermissionRequest` (once per window, only under `media.eme.require-app-approval`, not when the pref is locked) whose answer is ignored: the page is refused exactly as before. The app turns it into "This page needs DRM, which is turned off · Turn on". Marker `FIREDOWN-EME-DISABLED-NOTICE` (both the `.cpp` and the `.h`). **Fails loudly** if an anchor moved. See "DRM / EME" below. |
 | gradle edit | `firedown/patches/0009-restore-release-publication.sh` | Restore the geckoview **`release` Maven publication** FF153 dropped (upstream now publishes debug-only, so `publishReleasePublicationToMavenLocal` — which phase-2 drives — vanished). Appends a **POM-only** release publication (sources + javadoc jars, **no** `from components.release`) that reproduces the 151/152 contract phase-2 depends on: POM + sources + javadoc, no main `.aar` (packaging stamped `pom`), no `.module`. Marker `FIREDOWN-RELEASE-PUBLICATION`. **Fails loudly** if the debug-publication anchor moved. See phase-2 mechanics below. |
 | build flags | `mozconfig/geckoview-release.mozconfig` | Build-level switches: `--enable-geckoview-lite` (artifactId `geckoview` not `geckoview-omni`, and drops the Glean dep), `--disable-crashreporter`, `--disable-parental-controls`, `--enable-strip`/`--enable-install-strip` (shrink libxul), release/Android target. (`--disable-eme` and the telemetry/healthreport/normandy `MOZ_*` vars were removed — FF 151 configure rejects them, "can not be set by mozconfig … accepted from: implied"; those layers are covered by runtime prefs + the non-official build.) |
 
@@ -128,6 +129,20 @@ DRM-off was never allowed to depend on the build flag alone. If a future Firefox
 version accepts the flag again, re-add it for belt-and-suspenders compile-time
 removal; until then the pref is load-bearing. (Update the modifications table's
 "build flags" row too if you change this.)
+
+### Telling the app a page wanted DRM (`0010`)
+
+With the pref off Gecko notifies `mediakeys-request` / `api-disabled`, which
+only desktop Firefox listens to (`EncryptedMediaChild`); GeckoView forwards
+nothing, and its app-approval request comes AFTER the pref check. `0010`
+starts that approval request from the pref-off branch too, as a notice. Why
+not leave EME on and let the app refuse instead: the approval runs after
+`GetSupportedConfig`, so a refused page could tell "configuration not
+supported" from "app said no" and learn the phone's DRM capabilities; with the
+pref off every request gets the same refusal, and `0010` keeps it that way.
+The app answers the notice with PROMPT (GeckoView's `promptPermission` stores
+whatever value comes back). Re-verify the anchor on a bump: the pref-off block
+in `MediaKeySystemAccessManager.cpp` and `mAddedObservers` in the header.
 
 ## Telemetry / Glean — compiled in, neutered two ways
 
