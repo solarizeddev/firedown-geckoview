@@ -12,7 +12,8 @@
 # but nothing in GeckoView listens, so the app never learns that the page
 # wanted DRM and the user only sees the site's player fail.
 #
-# FIX: in that same branch, when the embedder asked to approve EME requests
+# FIX: at the end of that same branch, after the page has been refused, when
+# the embedder asked to approve EME requests
 # (media.eme.require-app-approval, GeckoView's default), also start a
 # MediaKeySystemAccessPermissionRequest so the app's PermissionDelegate hears
 # about it. The request is a NOTICE only: the page's promise is rejected
@@ -20,8 +21,9 @@
 # answers, so the page cannot tell this build from stock. Once per window
 # (a player probes many configurations), and not when media.eme.enabled is
 # locked (the same condition as Gecko's own notification). The app knows it
-# is a notice because its DRM switch is off; it answers "prompt" so nothing is
-# stored for the site.
+# is a notice because its DRM switch is off; it answers "prompt". GeckoView
+# stores that answer as a PROMPT row for the site (it stores every answer),
+# which nothing reads: Gecko asks the app every time regardless.
 #
 # Cannot be done app-side: the refusal happens in content-process C++ before
 # any embedder callback, and enabling EME just to hear the request would let
@@ -84,25 +86,26 @@ hdr = replace_once(
       "  bool mFiredownDisabledNoticeSent = false;\n",
     "manager state", "MediaKeySystemAccessManager.h")
 
-# ── 2. The pref-off branch: start a notice-only app-approval request. ─────────
+# ── 2. The pref-off branch: after the page has been refused, start a ─────────
+#       notice-only app-approval request. Placed AFTER the rejection so the
+#       path up to the page's rejection is byte-identical to stock.
 cpp = open(cpp_path, encoding="utf-8").read()
 anchor = (
-    "    if (!Preferences::IsLocked(\"media.eme.enabled\")) {\n"
-    "      MediaKeySystemAccess::NotifyObservers(mWindow, aRequest->mKeySystem,\n"
-    "                                            MediaKeySystemStatus::Api_disabled);\n"
-    "    }\n"
     "    aRequest->RejectPromiseWithNotSupportedError(\"EME has been preffed off\"_ns);\n"
+    "    aRequest->mDiagnostics.StoreMediaKeySystemAccess(\n"
+    "        mWindow->GetExtantDoc(), aRequest->mKeySystem, false, __func__);\n"
+    "    return;\n"
+    "  }\n"
 )
 notice = (
-    "    if (!Preferences::IsLocked(\"media.eme.enabled\")) {\n"
-    "      MediaKeySystemAccess::NotifyObservers(mWindow, aRequest->mKeySystem,\n"
-    "                                            MediaKeySystemStatus::Api_disabled);\n"
-    "    }\n"
-    "    // %s: nothing in GeckoView listens to\n" % marker
-    + "    // the notification above, so an embedder that approves EME requests\n"
-      "    // is told through its own permission request instead. A notice\n"
-      "    // only: the promise below is rejected now, whatever the app answers,\n"
-      "    // so the page sees exactly what it sees without this patch.\n"
+    "    aRequest->RejectPromiseWithNotSupportedError(\"EME has been preffed off\"_ns);\n"
+    "    aRequest->mDiagnostics.StoreMediaKeySystemAccess(\n"
+    "        mWindow->GetExtantDoc(), aRequest->mKeySystem, false, __func__);\n"
+    "    // %s: nothing in GeckoView listens to the\n" % marker
+    + "    // notification above, so an embedder that approves EME requests is\n"
+      "    // told through its own permission request instead. A notice only:\n"
+      "    // the page was refused above, whatever the app answers, and this\n"
+      "    // runs after the refusal so the page's path is exactly stock.\n"
       "    if (StaticPrefs::media_eme_require_app_approval() &&\n"
       "        !mFiredownDisabledNoticeSent &&\n"
       "        !Preferences::IsLocked(\"media.eme.enabled\")) {\n"
@@ -116,7 +119,8 @@ notice = (
       "        }\n"
       "      }\n"
       "    }\n"
-      "    aRequest->RejectPromiseWithNotSupportedError(\"EME has been preffed off\"_ns);\n"
+      "    return;\n"
+      "  }\n"
 )
 cpp = replace_once(cpp, anchor, notice, "pref-off branch",
                    "MediaKeySystemAccessManager.cpp")

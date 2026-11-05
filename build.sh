@@ -19,6 +19,7 @@
 #                        #     config/build.env and drops the stale source trees +
 #                        #     mavenLocal entry, then just run `docker`/`all`.
 #   ./build.sh all       # fetch → bootstrap → patch → build → sync
+#   ./build.sh patch build   # plain stages chain, run in the order given
 #   ./build.sh docker    #     run `all` (or passed stages) inside the build
 #                        #     container — use this on a too-new-glibc host (Arch),
 #                        #     where the vendored glsl-optimizer won't compile.
@@ -28,6 +29,26 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 S="$ROOT/scripts"
+
+# Several plain stages in one call run in order, stopping at the first that
+# fails: `./build.sh fetch patch build` (and `./build.sh docker fetch patch
+# build`, which passes them into the container). Only stages that take no
+# arguments of their own can be chained; anything else keeps its own args.
+if [ "$#" -gt 1 ]; then
+  chain=1
+  for stage in "$@"; do
+    case "$stage" in
+      prereqs|fetch|bootstrap|patch|build) ;;
+      *) chain=0 ;;
+    esac
+  done
+  if [ "$chain" = 1 ]; then
+    for stage in "$@"; do
+      bash "$ROOT/build.sh" "$stage"
+    done
+    exit 0
+  fi
+fi
 
 case "${1:-all}" in
   bump)      shift; bash "$S/bump-version.sh" "$@" ;;
