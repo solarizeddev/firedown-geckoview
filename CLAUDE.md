@@ -589,6 +589,17 @@ fetched GeckoView from a locally built one. Checklist: firedown's
   what other machines already hold. Any rebuild that should ship gets a new
   `GECKOVIEW_BUILD_DATE` (`./build.sh bump <milestone>.<newbuildid>`), even on
   the same Firefox tag.
+- **Which buildid: Mozilla's own, so our version reads as the upstream one.**
+  Bump with the buildid of Mozilla's official build of that tag (its build
+  starts ~20–50 s after the tag's commit; buildhub.moz.tools lists it), never a
+  hand-picked round time. Then `159.0.20261102144711` here *is* upstream
+  159.0.1 plus our patches, with nothing to look up. **Only exception — a
+  corrective rebuild of a tag whose upstream buildid we already published:**
+  use that buildid **+1 second** (`…144711` → `…144712`, then `…144713`), so
+  the version still sorts right after and visibly derives from upstream. Why:
+  159.0.1 shipped as `159.0.20261102144711` with Mozilla's downloaded libxul
+  (the fat-merge bug), so the fix had to ship under another number, and the
+  hand-picked `159.0.20261105170000` it got looked unrelated to upstream.
 - It refuses the two half-installed states the publish mechanics above
   describe (no `.aar` beside the POM; `<packaging>pom</packaging>`), warns on
   an empty `<dependencies>` and on a dirty tree (the git tag records the patch
