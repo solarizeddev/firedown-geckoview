@@ -302,12 +302,12 @@ a distinct configure/compile failure):
 | host tools (llvm-objdump, cbindgen) | `00-prereqs-arch.sh` packages (`llvm`, `rust-cbindgen`) | "Cannot find llvm-objdump", missing cbindgen |
 
 Still **manual** (version-pinned by Firefox, so we don't fetch blindly): the SDK
-**platform** — `sdkmanager "platforms;android-37.2"` (FF158–159 pin compileSdk
+**platform** — `sdkmanager "platforms;android-37.2"` (FF158–160 pin compileSdk
 major `37` + minor `2` + build-tools `37.0.0` in
 `build/moz.configure/android-sdk.configure`; it was `android-37.1` on FF154–157,
 `android-37.0` on FF153 and `android-36.1` on FF151, so re-check this string on
 a milestone bump) — and the **NDK must be the exact version FF pins: r30 on
-FF158–159** (r29 from FF151 through FF157 — the first NDK move in this repo's
+FF158–160** (r29 from FF151 through FF157 — the first NDK move in this repo's
 history; `python/mozboot/mozboot/android.py` `NDK_VERSION`); configure validates
 it. The Docker path is unaffected by either: `mach bootstrap` is idempotent and
 provisions the newly pinned NDK + platform into `.docker-build/mozbuild` beside
@@ -590,8 +590,9 @@ fetched GeckoView from a locally built one. Checklist: firedown's
   `GECKOVIEW_BUILD_DATE` (`./build.sh bump <milestone>.<newbuildid>`), even on
   the same Firefox tag.
 - **Which buildid: Mozilla's own, so our version reads as the upstream one.**
-  Bump with the buildid of Mozilla's official build of that tag (its build
-  starts ~20–50 s after the tag's commit; buildhub.moz.tools lists it), never a
+  Bump with the buildid of Mozilla's official build of that tag (it starts
+  anywhere from ~20 s to ~30 min after the tag's commit — 160.0: 29 min,
+  158.0: 23 min; buildhub.moz.tools lists it), never a
   hand-picked round time. Then `159.0.20261102144711` here *is* upstream
   159.0.1 plus our patches, with nothing to look up. **Only exception — a
   corrective rebuild of a tag whose upstream buildid we already published:**
