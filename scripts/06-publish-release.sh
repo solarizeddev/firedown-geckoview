@@ -145,10 +145,16 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   git tag -a "$TAG" -m "GeckoView $VER (Firefox $FIREFOX_VERSION / $FIREFOX_TAG, Firedown patch set at $(git rev-parse --short HEAD))"
+fi
+# Push whenever the remote lacks the tag, NOT only right after creating it: a
+# run that tagged locally but died on the push (160.0.1) otherwise skips the
+# push on every retry, and `gh release create` then mints its own lightweight
+# tag on the default branch instead of our annotated one.
+if [[ -z "$(git ls-remote origin "refs/tags/$TAG")" ]]; then
   git push origin "refs/tags/$TAG"
 fi
 
-NOTES="Patched GeckoView for the Firedown app, built from Firefox $FIREFOX_TAG with the Firedown patch set at $(git rev-parse --short HEAD).
+NOTES="Patched GeckoView for the Firedown app, built from Firefox $FIREFOX_TAG with the Firedown patch set at $(git rev-parse --short "$TAG^{commit}").
 
 Maven coordinate: org.mozilla.geckoview:$ART_ID:$VER   (ABIs: ${ABIS:-see AAR})
 

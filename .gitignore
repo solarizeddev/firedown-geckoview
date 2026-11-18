@@ -15,3 +15,7 @@ objdir*/
 
 # Release tarballs written by scripts/06-publish-release.sh (uploaded to GitHub Releases).
 dist/
+
+# Build logs teed at the top level (build.log, rebuild.log, …) — otherwise they
+# trip 06-publish-release.sh's dirty-tree warning.
+/*.log
